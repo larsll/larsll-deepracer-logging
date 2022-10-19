@@ -4,7 +4,6 @@ import logging
 import importlib
 import sys
 import time
-import traceback
 from threading import Event
 
 import rclpy
@@ -12,11 +11,9 @@ from rclpy.node import Node
 from rclpy.time import Duration
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup
-from rclpy.serialization import deserialize_message, serialize_message
+from rclpy.serialization import serialize_message
 
 import rosbag2_py
-from rosidl_runtime_py.utilities import get_message
-from std_msgs.msg import String
 from rcl_interfaces.msg import ParameterDescriptor, ParameterType
 
 from logging_pkg.constants import (RecordingState)
@@ -175,32 +172,6 @@ class BagLogNode(Node):
                                          serialization_format=serialization_format)
 
         writer.create_topic(topic)
-
-    def test_sequential_writer(self, tmp_path):
-        """
-        Test for sequential writer.
-        :return:
-        """
-        bag_path = str(tmp_path / 'tmp_write_test')
-
-        storage_options, converter_options = self.get_rosbag_options(bag_path)
-
-        writer = rosbag2_py.SequentialWriter()
-        writer.open(storage_options, converter_options)
-
-        # create topic
-        topic_name = '/chatter'
-        self.create_topic(writer, topic_name, 'std_msgs/msg/String')
-
-        for i in range(10):
-            msg = String()
-            msg.data = f'Hello, world! {str(i)}'
-            time_stamp = i * 100
-
-            writer.write(topic_name, serialize_message(msg), time_stamp)
-
-        # close bag and create new storage instance
-        del writer
 
 
 def main(args=None):
