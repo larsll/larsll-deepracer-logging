@@ -11,7 +11,6 @@ from rclpy.node import Node
 from rclpy.time import Duration
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup
-from rclpy.serialization import serialize_message
 
 import rosbag2_py
 from rcl_interfaces.msg import ParameterDescriptor, ParameterType
@@ -59,7 +58,7 @@ class BagLogNode(Node):
         self._main_cbg = ReentrantCallbackGroup()
         self._monitor_node_sub = self.create_subscription(
             self._monitor_topic_class, self._monitor_topic, self._receive_monitor_callback, 1,
-            callback_group=self._main_cbg)
+            callback_group=self._main_cbg, raw=True)
 
         # Check if timeout receiver thread
         self._timeout_check_timer = self.create_timer(
@@ -101,8 +100,7 @@ class BagLogNode(Node):
                 self.get_logger().info("Got callback from {}. Triggering start.". format(self._monitor_topic))
 
             elif self._target_edit_state == RecordingState.Running:
-                self.get_logger().info(msg.images[0].header.frame_id)
-                self._bag_writer.write(self._monitor_topic, serialize_message(msg), self.get_clock().now().nanoseconds)
+                self._bag_writer.write(self._monitor_topic, msg, self.get_clock().now().nanoseconds)
 
         except Exception as e:  # noqa E722
             self.get_logger().error("{} occurred in _receive_monitor_callback.".format(sys.exc_info()[0]))
