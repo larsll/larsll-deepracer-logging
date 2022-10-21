@@ -4,7 +4,9 @@ import logging
 import importlib
 import sys
 import time
+from enum import IntEnum
 from threading import Event
+import traceback
 
 import rclpy
 from rclpy.node import Node
@@ -18,11 +20,23 @@ from rcl_interfaces.msg import ParameterDescriptor, ParameterType
 from logging_pkg.constants import (RecordingState)
 
 
+class NodeState(IntEnum):
+    """ Status of node
+    Extends:
+        Enum
+    """
+    Starting = 0
+    Scanning = 1
+    Running = 2
+    Error = 3
+
+
 class BagLogNode(Node):
     """ This node is used to log a topic to a rosbag2.
     """
     _shutdown = Event()
     _target_edit_state = RecordingState.Stopped
+    _state = NodeState.Starting
 
     def __init__(self):
         super().__init__('bag_log_node')
@@ -38,12 +52,8 @@ class BagLogNode(Node):
         self._monitor_topic = self.get_parameter('monitor_topic').value
 
         self.declare_parameter(
-            'monitor_topic_type', 'deepracer_interfaces_pkg/msg/InferResultsArray',
+            'monitor_topic_type', 'NOT_USED',
             ParameterDescriptor(type=ParameterType.PARAMETER_STRING))
-        self._monitor_topic_type = self.get_parameter('monitor_topic_type').value
-        module_name, class_name = self._monitor_topic_type.replace('/', '.').rsplit(".", 1)
-        type_module = importlib.import_module(module_name)
-        self._monitor_topic_class = getattr(type_module, class_name)
 
         self.declare_parameter(
             'monitor_topic_timeout', 1,
@@ -56,21 +66,20 @@ class BagLogNode(Node):
 
         # Subscription to monitor topic.
         self._main_cbg = ReentrantCallbackGroup()
-        self._monitor_node_sub = self.create_subscription(
-            self._monitor_topic_class, self._monitor_topic, self._receive_monitor_callback, 1,
-            callback_group=self._main_cbg, raw=True)
 
-        # Check if timeout receiver thread
-        self._timeout_check_timer = self.create_timer(
-            self._monitor_topic_timeout/10, callback=self._timeout_check_timer_cb, callback_group=self._main_cbg)
+        # Start the scan
+        self._scan_timer = self.create_timer(1.0, callback=self._scan_for_monitor_cb,
+                                             callback_group=self._main_cbg)
+
+        # Start monitoring GC
+        self._start_monitor_gc = self.create_guard_condition(callback=self._start_monitoring_cb,
+                                                             callback_group=self._main_cbg)
 
         # Change monitor
         self._change_gc = self.create_guard_condition(callback=self._change_cb,
                                                       callback_group=self._main_cbg)
 
-        self.get_logger().info('Monitoring {} of type {} with timeout {} seconds'.format(self._monitor_topic,
-                               self._monitor_topic_type, self._monitor_topic_timeout))
-        self.get_logger().info('Node started. Ready to control.')
+        self.get_logger().info('Node started. Scanning for {}.'.format(self._monitor_topic))
 
         return self
 
@@ -80,14 +89,58 @@ class BagLogNode(Node):
         self.get_logger().info('Stopping the node due to {}.'.format(ExcType.__name__))
 
         try:
-            self._stop_bag()
+            if self._target_edit_state == RecordingState.Running:
+                self._stop_bag()
+
             self._shutdown.set()
             self._change_gc.destroy()
-            self._timeout_check_timer.destroy()
+            self._start_monitor_gc.destroy()
+
+            if self._timeout_check_timer is not None:
+                self._timeout_check_timer.destroy()
+
+            if self._monitor_node_sub is not None:
+                self._monitor_node_sub.destroy()
+
         except:  # noqa E722
-            self.get_logger().error("{} occurred.".format(sys.exc_info()[0]))
+            self.get_logger().error(traceback.format_stack())
         finally:
             self.get_logger().info('Node cleanup done. Exiting.')
+
+    def _scan_for_monitor_cb(self):
+        """Method that is called by self._scan_timer to check if the monitor topic 
+        is available. If yes it will trigger the startup procedure.
+        """
+        self._state = NodeState.Scanning
+        topics = self.get_publishers_info_by_topic(self._monitor_topic)
+
+        for topic in topics:
+            self._monitor_topic_type = topic.topic_type
+            module_name, class_name = self._monitor_topic_type.replace('/', '.').rsplit(".", 1)
+            type_module = importlib.import_module(module_name)
+            self._monitor_topic_class = getattr(type_module, class_name)
+
+            self._scan_timer.destroy()
+            self._start_monitor_gc.trigger()
+
+    def _start_monitoring_cb(self):
+        """Method that is called by self._start_monitor_gc, triggered mainly by self._scan_for_monitor_cb
+        to start the subscription, and start the self._timeout_check_timer.
+        """
+
+        # Create subscription on monitor
+        self._monitor_node_sub = self.create_subscription(
+            self._monitor_topic_class, self._monitor_topic, self._receive_monitor_callback, 1,
+            callback_group=self._main_cbg, raw=True)
+
+        # Check if timeout receiver thread
+        self._timeout_check_timer = self.create_timer(
+            self._monitor_topic_timeout/10, callback=self._timeout_check_timer_cb, callback_group=self._main_cbg)
+
+        self.get_logger().info('Monitoring {} of type {} with timeout {} seconds'.format(self._monitor_topic,
+                               self._monitor_topic_type, self._monitor_topic_timeout))
+
+        self._state = NodeState.Running
 
     def _receive_monitor_callback(self, msg):
         """Permanent method that will receive commands via serial
@@ -103,6 +156,7 @@ class BagLogNode(Node):
                 self._bag_writer.write(self._monitor_topic, msg, self.get_clock().now().nanoseconds)
 
         except Exception as e:  # noqa E722
+            self.get_logger().error(traceback.format_stack())
             self.get_logger().error("{} occurred in _receive_monitor_callback.".format(sys.exc_info()[0]))
 
     def _timeout_check_timer_cb(self):
