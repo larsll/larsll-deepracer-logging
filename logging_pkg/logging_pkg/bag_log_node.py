@@ -108,7 +108,7 @@ class BagLogNode(Node):
             self.get_logger().info('Node cleanup done. Exiting.')
 
     def _scan_for_monitor_cb(self):
-        """Method that is called by self._scan_timer to check if the monitor topic 
+        """Method that is called by self._scan_timer to check if the monitor topic
         is available. If yes it will trigger the startup procedure.
         """
         self._state = NodeState.Scanning
