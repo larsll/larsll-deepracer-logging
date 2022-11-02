@@ -6,10 +6,11 @@ import sys
 import time
 from enum import IntEnum
 from threading import Event
+from typing import List, Tuple
 import traceback
 
 import rclpy
-from rclpy.node import Node
+from rclpy.node import Node, Subscription
 from rclpy.time import Duration
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -38,6 +39,10 @@ class BagLogNode(Node):
     _target_edit_state = RecordingState.Stopped
     _state = NodeState.Starting
 
+    _subscriptions: List[Subscription] = []
+    _topics_types: List[Tuple[str, str]] = []
+    _topics_to_scan: List[str] = []
+
     def __init__(self):
         super().__init__('bag_log_node')
 
@@ -52,15 +57,20 @@ class BagLogNode(Node):
         self._monitor_topic = self.get_parameter('monitor_topic').value
 
         self.declare_parameter(
-            'monitor_topic_type', 'NOT_USED',
-            ParameterDescriptor(type=ParameterType.PARAMETER_STRING))
-
-        self.declare_parameter(
             'monitor_topic_timeout', 1,
             ParameterDescriptor(type=ParameterType.PARAMETER_INTEGER))
         self._monitor_topic_timeout = self.get_parameter('monitor_topic_timeout').value
         self._monitor_timeout_duration = Duration(seconds=self._monitor_topic_timeout)
         self._monitor_last_received = self.get_clock().now()
+
+        self.declare_parameter(
+            'log_topics', [],
+            ParameterDescriptor(type=ParameterType.PARAMETER_STRING_ARRAY))
+        self._log_topics = self.get_parameter('log_topics').value
+
+        self._topics_to_scan += self._log_topics
+        if self._topics_to_scan.count(self._monitor_topic) > 0:
+            self._topics_to_scan.remove(self._monitor_topic)
 
     def __enter__(self):
 
@@ -68,18 +78,16 @@ class BagLogNode(Node):
         self._main_cbg = ReentrantCallbackGroup()
 
         # Start the scan
-        self._scan_timer = self.create_timer(1.0, callback=self._scan_for_monitor_cb,
+        self._state = NodeState.Scanning
+        self._scan_timer = self.create_timer(1.0, callback=self._scan_for_topics_cb,
                                              callback_group=self._main_cbg)
-
-        # Start monitoring GC
-        self._start_monitor_gc = self.create_guard_condition(callback=self._start_monitoring_cb,
-                                                             callback_group=self._main_cbg)
 
         # Change monitor
         self._change_gc = self.create_guard_condition(callback=self._change_cb,
                                                       callback_group=self._main_cbg)
 
-        self.get_logger().info('Node started. Scanning for {}.'.format(self._monitor_topic))
+        self.get_logger().info('Node started. Monitor \'{}\'. Additionally logging {}.'
+                               .format(self._monitor_topic, str(self._topics_to_scan)))
 
         return self
 
@@ -94,66 +102,93 @@ class BagLogNode(Node):
 
             self._shutdown.set()
             self._change_gc.destroy()
-            self._start_monitor_gc.destroy()
 
-            if self._timeout_check_timer is not None:
+            if hasattr(self, '_timeout_check_timer'):
                 self._timeout_check_timer.destroy()
 
-            if self._monitor_node_sub is not None:
-                self._monitor_node_sub.destroy()
+            for sub in self._subscriptions:
+                sub.destroy()
 
         except:  # noqa E722
             self.get_logger().error(traceback.format_stack())
         finally:
             self.get_logger().info('Node cleanup done. Exiting.')
 
-    def _scan_for_monitor_cb(self):
+    def _scan_for_topics_cb(self):
         """Method that is called by self._scan_timer to check if the monitor topic
         is available. If yes it will trigger the startup procedure.
         """
-        self._state = NodeState.Scanning
-        topics = self.get_publishers_info_by_topic(self._monitor_topic)
 
-        for topic in topics:
-            self._monitor_topic_type = topic.topic_type
-            module_name, class_name = self._monitor_topic_type.replace('/', '.').rsplit(".", 1)
-            type_module = importlib.import_module(module_name)
-            self._monitor_topic_class = getattr(type_module, class_name)
+        try:
+            if self._state == NodeState.Scanning:
+                topic_endpoints = self.get_publishers_info_by_topic(self._monitor_topic)
 
-            self._scan_timer.destroy()
-            self._start_monitor_gc.trigger()
+                for topic in topic_endpoints[:1]:
+                    module_name, class_name = topic.topic_type.replace('/', '.').rsplit(".", 1)
+                    type_module = importlib.import_module(module_name)
+                    topic_class = getattr(type_module, class_name)
 
-    def _start_monitoring_cb(self):
-        """Method that is called by self._start_monitor_gc, triggered mainly by self._scan_for_monitor_cb
-        to start the subscription, and start the self._timeout_check_timer.
-        """
+                    self._subscriptions.append(self.create_subscription(
+                        topic_class, self._monitor_topic,
+                        lambda msg: self._receive_monitor_callback(msg, topic=self._monitor_topic), 1,
+                        callback_group=self._main_cbg, raw=True))
+                    self._topics_types.append((self._monitor_topic, topic.topic_type))
 
-        # Create subscription on monitor
-        self._monitor_node_sub = self.create_subscription(
-            self._monitor_topic_class, self._monitor_topic, self._receive_monitor_callback, 1,
-            callback_group=self._main_cbg, raw=True)
+                    # Check if timeout receiver thread
+                    self._timeout_check_timer = self.create_timer(
+                        self._monitor_topic_timeout/10, callback=self._timeout_check_timer_cb,
+                        callback_group=self._main_cbg)
 
-        # Check if timeout receiver thread
-        self._timeout_check_timer = self.create_timer(
-            self._monitor_topic_timeout/10, callback=self._timeout_check_timer_cb, callback_group=self._main_cbg)
+                    self.get_logger().info('Monitoring {} of type {} with timeout {} seconds'.format(
+                                           self._monitor_topic, topic.topic_type, self._monitor_topic_timeout))
 
-        self.get_logger().info('Monitoring {} of type {} with timeout {} seconds'.format(self._monitor_topic,
-                               self._monitor_topic_type, self._monitor_topic_timeout))
+                    self._state = NodeState.Running
 
-        self._state = NodeState.Running
+            for scan_topic in self._topics_to_scan[:]:
+                topic_endpoints = self.get_publishers_info_by_topic(scan_topic)
 
-    def _receive_monitor_callback(self, msg):
-        """Permanent method that will receive commands via serial
+                for topic in topic_endpoints[:1]:
+                    module_name, class_name = topic.topic_type.replace('/', '.').rsplit(".", 1)
+                    type_module = importlib.import_module(module_name)
+                    topic_class = getattr(type_module, class_name)
+
+                    self._subscriptions.append(self.create_subscription(
+                        topic_class, scan_topic,
+                        lambda msg: self._receive_monitor_callback(msg, topic=scan_topic), 1,
+                        callback_group=self._main_cbg, raw=True))
+                    self._topics_types.append((scan_topic, topic.topic_type))
+
+                    self._topics_to_scan.remove(scan_topic)
+                    self.get_logger().info('Logging {} of type {}.'.format(scan_topic,
+                                           topic.topic_type))
+
+            if self._state == NodeState.Running and len(self._topics_to_scan) == 0:
+                self.get_logger().info('All topics found. {} subscriptions active.'
+                                       .format(len(self._subscriptions)))
+                self._scan_timer.destroy()
+
+        except:  # noqa E722
+            self.get_logger().error(traceback.format_stack())
+
+    def _receive_monitor_callback(self, msg, topic):
+        """ All messages are received in this single callback.
+            As subscriptions are raw we cannot review the messages, they
+            are directly written to the bag!
         """
         try:
-            self._monitor_last_received = self.get_clock().now()
-            if self._target_edit_state == RecordingState.Stopped:
-                self._target_edit_state = RecordingState.Running
-                self._change_gc.trigger()
-                self.get_logger().info("Got callback from {}. Triggering start.". format(self._monitor_topic))
+            self.get_logger().debug("Got message on {}.". format(topic))
+            time_recv = self.get_clock().now()
 
-            elif self._target_edit_state == RecordingState.Running:
-                self._bag_writer.write(self._monitor_topic, msg, self.get_clock().now().nanoseconds)
+            if topic == self._monitor_topic:
+                self._monitor_last_received = time_recv
+                if self._target_edit_state == RecordingState.Stopped:
+                    self._target_edit_state = RecordingState.Running
+                    self._change_gc.trigger()
+                    self.get_logger().info("Got callback from {}. Triggering start.". format(self._monitor_topic))
+
+            # Check that we are running and that bag is open.
+            if self._target_edit_state == RecordingState.Running and hasattr(self, '_bag_writer'):
+                self._bag_writer.write(topic, msg, time_recv.nanoseconds)
 
         except Exception as e:  # noqa E722
             self.get_logger().error(traceback.format_stack())
@@ -204,7 +239,8 @@ class BagLogNode(Node):
         self._bag_writer = rosbag2_py.SequentialWriter()
         self._bag_writer.open(storage_options, converter_options)
 
-        self.create_topic(self._bag_writer, self._monitor_topic, self._monitor_topic_type)
+        for topic_type in self._topics_types:
+            self.create_topic(self._bag_writer, topic_type[0], topic_type[1])
 
     def _stop_bag(self):
 

@@ -25,6 +25,9 @@ def generate_launch_description():
             executable='bag_log_node',
             name='bag_log_node',
             parameters=[{
+                    'monitor_topic': '/inference_pkg/rl_results',
+                    'log_topics': ['/camera_pkg/display_mjpeg',
+                                   '/camera_pkg/video_mjpeg'],
                     'output_path': '/opt/aws/deepracer/logs/deepracer-bag-{}'
             }]
         )

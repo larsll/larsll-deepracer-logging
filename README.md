@@ -29,6 +29,7 @@ The `logging_pkg_launch.py`, included in this package, provides an example demon
 | ---------------- |  ----------- |
 | `monitor_topic` | Name of the topic that will be monitoried. Default `/inference_pkg/rl_results`|
 | `monitor_topic_timeout` | Integer defining the timeout (in seconds) before a bag is closed. Default is 1.|
+| `log_topics` | Array of the topics that will be additionally logged. Default none. |
 | `output_path` | Path to which the bag-files are written. Supports including `{}` to add timestamp to the bag directory. Default `deepracer-bag-{}`.| 
 
 #### Subscribed topics
