@@ -235,7 +235,7 @@ class BagLogNode(Node):
             input_serialization_format=serialization_format,
             output_serialization_format=serialization_format)
 
-        storage_options = rosbag2_py.StorageOptions(uri=bag_path, storage_id='sqlite3')
+        storage_options = rosbag2_py.StorageOptions(uri=bag_path, storage_id='mcap')
 
         self._bag_writer = rosbag2_py.SequentialWriter()
         self._bag_writer.open(storage_options, converter_options)
