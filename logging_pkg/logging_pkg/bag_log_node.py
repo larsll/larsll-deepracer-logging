@@ -10,7 +10,8 @@ from typing import List, Tuple
 import traceback
 
 import rclpy
-from rclpy.node import Node, Subscription
+from rclpy.node import Node, Subscription, TopicEndpointInfo, QoSProfile
+from rclpy.qos import ReliabilityPolicy, HistoryPolicy
 from rclpy.time import Duration
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -40,7 +41,7 @@ class BagLogNode(Node):
     _state = NodeState.Starting
 
     _subscriptions: List[Subscription] = []
-    _topics_types: List[Tuple[str, str]] = []
+    _topics_type_info: List[Tuple[str, TopicEndpointInfo]] = []
     _topics_to_scan: List[str] = []
 
     def __init__(self):
@@ -121,18 +122,10 @@ class BagLogNode(Node):
 
         try:
             if self._state == NodeState.Scanning:
-                topic_endpoints = self.get_publishers_info_by_topic(self._monitor_topic)
+                topic_endpoints: List[TopicEndpointInfo] = self.get_publishers_info_by_topic(self._monitor_topic)
 
-                for topic in topic_endpoints[:1]:
-                    module_name, class_name = topic.topic_type.replace('/', '.').rsplit(".", 1)
-                    type_module = importlib.import_module(module_name)
-                    topic_class = getattr(type_module, class_name)
-
-                    self._subscriptions.append(self.create_subscription(
-                        topic_class, self._monitor_topic,
-                        lambda msg: self._receive_monitor_callback(msg, topic=self._monitor_topic), 1,
-                        callback_group=self._main_cbg, raw=True))
-                    self._topics_types.append((self._monitor_topic, topic.topic_type))
+                for topic_endpoint in topic_endpoints[:1]:
+                    self._create_subscription(self._monitor_topic, topic_endpoint)
 
                     # Check if timeout receiver thread
                     self._timeout_check_timer = self.create_timer(
@@ -140,27 +133,19 @@ class BagLogNode(Node):
                         callback_group=self._main_cbg)
 
                     self.get_logger().info('Monitoring {} of type {} with timeout {} seconds'.format(
-                                           self._monitor_topic, topic.topic_type, self._monitor_topic_timeout))
+                                           self._monitor_topic, topic_endpoint.topic_type, self._monitor_topic_timeout))
 
                     self._state = NodeState.Running
 
             for scan_topic in self._topics_to_scan[:]:
-                topic_endpoints = self.get_publishers_info_by_topic(scan_topic)
+                topic_endpoints: List[TopicEndpointInfo] = self.get_publishers_info_by_topic(scan_topic)
 
-                for topic in topic_endpoints[:1]:
-                    module_name, class_name = topic.topic_type.replace('/', '.').rsplit(".", 1)
-                    type_module = importlib.import_module(module_name)
-                    topic_class = getattr(type_module, class_name)
-
-                    self._subscriptions.append(self.create_subscription(
-                        topic_class, scan_topic,
-                        lambda msg: self._receive_monitor_callback(msg, topic=scan_topic), 1,
-                        callback_group=self._main_cbg, raw=True))
-                    self._topics_types.append((scan_topic, topic.topic_type))
+                for topic_endpoint in topic_endpoints[:1]:
+                    self._create_subscription(scan_topic, topic_endpoint)
 
                     self._topics_to_scan.remove(scan_topic)
                     self.get_logger().info('Logging {} of type {}.'.format(scan_topic,
-                                           topic.topic_type))
+                                           topic_endpoint.topic_type))
 
             if self._state == NodeState.Running and len(self._topics_to_scan) == 0:
                 self.get_logger().info('All topics found. {} subscriptions active.'
@@ -169,6 +154,22 @@ class BagLogNode(Node):
 
         except:  # noqa E722
             self.get_logger().error(traceback.format_stack())
+
+    def _create_subscription(self, topic_name, topic_endpoint: TopicEndpointInfo):
+        module_name, class_name = topic_endpoint.topic_type.replace('/', '.').rsplit(".", 1)
+        type_module = importlib.import_module(module_name)
+        topic_class = getattr(type_module, class_name)
+
+        topic_sub_qos = QoSProfile(depth=10)
+        topic_sub_qos.reliability = topic_endpoint.qos_profile.reliability
+        topic_sub_qos.history = HistoryPolicy.KEEP_ALL
+
+        self._subscriptions.append(self.create_subscription(
+            topic_class, topic_name,
+            lambda msg: self._receive_monitor_callback(msg, topic=topic_name),
+            qos_profile=topic_sub_qos,
+            callback_group=self._main_cbg, raw=True))
+        self._topics_type_info.append((topic_name, topic_endpoint))
 
     def _receive_monitor_callback(self, msg, topic):
         """ All messages are received in this single callback.
@@ -239,14 +240,14 @@ class BagLogNode(Node):
         self._bag_writer = rosbag2_py.SequentialWriter()
         self._bag_writer.open(storage_options, converter_options)
 
-        for topic_type in self._topics_types:
-            self.create_topic(self._bag_writer, topic_type[0], topic_type[1])
+        for topic_type_info in self._topics_type_info:
+            self.create_topic(self._bag_writer, topic_type_info[0], topic_type_info[1])
 
     def _stop_bag(self):
 
         del self._bag_writer
 
-    def create_topic(self, writer, topic_name, topic_type, serialization_format='cdr'):
+    def create_topic(self, writer, topic_name, topic_type_info: TopicEndpointInfo, serialization_format='cdr'):
         """
         Create a new topic.
         :param writer: writer instance
@@ -256,7 +257,7 @@ class BagLogNode(Node):
         :return:
         """
         topic_name = topic_name
-        topic = rosbag2_py.TopicMetadata(name=topic_name, type=topic_type,
+        topic = rosbag2_py.TopicMetadata(name=topic_name, type=topic_type_info.topic_type,
                                          serialization_format=serialization_format)
 
         writer.create_topic(topic)
