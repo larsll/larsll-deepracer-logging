@@ -10,7 +10,8 @@ from typing import List, Tuple
 import traceback
 
 import rclpy
-from rclpy.node import Node, Subscription, TopicEndpointInfo
+from rclpy.node import Node, Subscription, TopicEndpointInfo, QoSProfile
+from rclpy.qos import ReliabilityPolicy, HistoryPolicy
 from rclpy.time import Duration
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -153,10 +154,14 @@ class BagLogNode(Node):
                     type_module = importlib.import_module(module_name)
                     topic_class = getattr(type_module, class_name)
 
+                    topic_sub_qos = QoSProfile(depth=10)
+                    topic_sub_qos.reliability = topic_endpoint.qos_profile.reliability
+                    topic_sub_qos.history = HistoryPolicy.KEEP_ALL
+
                     self._subscriptions.append(self.create_subscription(
                         topic_class, scan_topic,
                         lambda msg: self._receive_monitor_callback(msg, topic=scan_topic),
-                        topic_endpoint.qos_profile,
+                        qos_profile=topic_sub_qos,
                         callback_group=self._main_cbg, raw=True))
                     self._topics_type_info.append((scan_topic, topic_endpoint))
 
