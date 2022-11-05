@@ -125,16 +125,7 @@ class BagLogNode(Node):
                 topic_endpoints: List[TopicEndpointInfo] = self.get_publishers_info_by_topic(self._monitor_topic)
 
                 for topic_endpoint in topic_endpoints[:1]:
-                    module_name, class_name = topic_endpoint.topic_type.replace('/', '.').rsplit(".", 1)
-                    type_module = importlib.import_module(module_name)
-                    topic_class = getattr(type_module, class_name)
-
-                    self._subscriptions.append(self.create_subscription(
-                        topic_class, self._monitor_topic,
-                        lambda msg: self._receive_monitor_callback(msg, topic=self._monitor_topic),
-                        topic_endpoint.qos_profile,
-                        callback_group=self._main_cbg, raw=True))
-                    self._topics_type_info.append((self._monitor_topic, topic_endpoint))
+                    self._create_subscription(self._monitor_topic, topic_endpoint)
 
                     # Check if timeout receiver thread
                     self._timeout_check_timer = self.create_timer(
@@ -150,20 +141,7 @@ class BagLogNode(Node):
                 topic_endpoints: List[TopicEndpointInfo] = self.get_publishers_info_by_topic(scan_topic)
 
                 for topic_endpoint in topic_endpoints[:1]:
-                    module_name, class_name = topic_endpoint.topic_type.replace('/', '.').rsplit(".", 1)
-                    type_module = importlib.import_module(module_name)
-                    topic_class = getattr(type_module, class_name)
-
-                    topic_sub_qos = QoSProfile(depth=10)
-                    topic_sub_qos.reliability = topic_endpoint.qos_profile.reliability
-                    topic_sub_qos.history = HistoryPolicy.KEEP_ALL
-
-                    self._subscriptions.append(self.create_subscription(
-                        topic_class, scan_topic,
-                        lambda msg: self._receive_monitor_callback(msg, topic=scan_topic),
-                        qos_profile=topic_sub_qos,
-                        callback_group=self._main_cbg, raw=True))
-                    self._topics_type_info.append((scan_topic, topic_endpoint))
+                    self._create_subscription(scan_topic, topic_endpoint)
 
                     self._topics_to_scan.remove(scan_topic)
                     self.get_logger().info('Logging {} of type {}.'.format(scan_topic,
@@ -176,6 +154,22 @@ class BagLogNode(Node):
 
         except:  # noqa E722
             self.get_logger().error(traceback.format_stack())
+
+    def _create_subscription(self, topic_name, topic_endpoint: TopicEndpointInfo):
+        module_name, class_name = topic_endpoint.topic_type.replace('/', '.').rsplit(".", 1)
+        type_module = importlib.import_module(module_name)
+        topic_class = getattr(type_module, class_name)
+
+        topic_sub_qos = QoSProfile(depth=10)
+        topic_sub_qos.reliability = topic_endpoint.qos_profile.reliability
+        topic_sub_qos.history = HistoryPolicy.KEEP_ALL
+
+        self._subscriptions.append(self.create_subscription(
+            topic_class, topic_name,
+            lambda msg: self._receive_monitor_callback(msg, topic=topic_name),
+            qos_profile=topic_sub_qos,
+            callback_group=self._main_cbg, raw=True))
+        self._topics_type_info.append((topic_name, topic_endpoint))
 
     def _receive_monitor_callback(self, msg, topic):
         """ All messages are received in this single callback.
