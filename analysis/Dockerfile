@@ -1,5 +1,5 @@
 ## Run with
-## 
+## docker run -ti -p 8888:8888 -v `pwd`:/workspace/analysis -v <logsdir>:/workspace/logs <imagename>
 
 FROM ros:foxy-ros-base
 
