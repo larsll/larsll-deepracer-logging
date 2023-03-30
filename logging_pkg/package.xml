@@ -10,7 +10,7 @@
   <depend>rosbag2_py</depend>
   <depend>rclpy</depend>
   <depend>rcl_interfaces</depend>
-  <depend>deepracer_viz</depend>
+  <test_depend>deepracer_viz</test_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
