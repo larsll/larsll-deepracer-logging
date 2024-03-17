@@ -241,7 +241,7 @@ class BagLogNode(Node):
 
             if self._state == NodeState.Running and len(self._topics_to_scan) == 0:
                 self.get_logger().info('All topics found. {} subscriptions active.'
-                                       .format(len(self._subscriptions)))
+                                       .format(len(self._topics_type_info)))
                 self._scan_timer.destroy()
 
         except:  # noqa E722
