@@ -1,26 +1,20 @@
-from enum import Enum, IntEnum
-import cv2
+from enum import IntEnum
 
-# Topics / Services
-MAIN_CAMERA_TOPIC = "/camera_pkg/display_mjpeg"
-VIDEO_STATE_SRV = "/camera_pkg/media_state"
-IMU_TOPIC = "/imu_pkg/imu_raw"
-PUBLISH_SENSOR_TOPIC = "/sensor_fusion_pkg/sensor_msg"
-PUBLISH_VIDEO_TOPIC = "display_stream"
-PUBLISH_COMPRESSED_VIDEO_TOPIC = "display_stream/compressed"
-STATUS_TOPIC = "status"
-RECORDING_STATE_SERVICE_NAME = "recording_state"
-LED_SET_SERVICE_NAME = "/servo_pkg/set_led_state"
+#########################################################################################
+# USBFileSystem services.
 
-# Agent Video editor constants
-MAX_FRAMES_IN_QUEUE = 2700
-KVS_PUBLISH_PERIOD = 1.0/15.0
-QUEUE_WAIT_TIME = 1  # In seconds
-MONITOR_CHECK_TIME = 0.05
+USB_FILE_SYSTEM_NOTIFICATION_TOPIC = "/usb_monitor_pkg/usb_file_system_notification"
+USB_FILE_SYSTEM_SUBSCRIBE_SERVICE_NAME = "/usb_monitor_pkg/usb_file_system_subscribe"
+USB_MOUNT_POINT_MANAGER_SERVICE_NAME = "/usb_monitor_pkg/usb_mount_point_manager"
 
-# LED MAX - a bit less than 24 bits
-LED_MAX_VALUE = 10000000
+# Output 
+LOGS_DEFAULT_FOLDER = "/opt/aws/deepracer/logs"
+LOGS_SOURCE_LEAF_DIRECTORY = "logs"
+LOGS_DIR_CB = "logs_dir_cb"
+LOGS_BAG_FOLDER_NAME_PATTERN = "{}-{}"
 
+# Naming
+DEFAULT_BAG_NAME = "deepracer"
 
 class RecordingState(IntEnum):
     """ Color to RGB mapping
