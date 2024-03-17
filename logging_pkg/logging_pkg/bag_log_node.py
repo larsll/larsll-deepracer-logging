@@ -12,7 +12,7 @@ import traceback
 
 import rclpy
 from rclpy.node import Node, Subscription, TopicEndpointInfo, QoSProfile
-from rclpy.qos import ReliabilityPolicy, HistoryPolicy
+from rclpy.qos import HistoryPolicy
 from rclpy.time import Duration
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -112,16 +112,16 @@ class BagLogNode(Node):
 
         # Create a subscription to the file name topic
         self._file_name_sub = self.create_subscription(String, self._file_name_topic,
-                                                        self._file_name_cb, 1)
+                                                       self._file_name_cb, 1)
 
         if self._monitor_usb:
             # Client to USB File system subscription service that allows the node to add the "models"
             # folder to the watchlist. The usb_monitor_node will trigger notification if it finds
             # the files/folders from the watchlist in the USB drive.
             self._usb_sub_cb_group = ReentrantCallbackGroup()
-            self._usb_file_system_subscribe_client = self.create_client(USBFileSystemSubscribeSrv,
-                                                                    constants.USB_FILE_SYSTEM_SUBSCRIBE_SERVICE_NAME,
-                                                                    callback_group=self._usb_sub_cb_group)
+            self._usb_file_system_subscribe_client = self.create_client(
+                USBFileSystemSubscribeSrv, constants.USB_FILE_SYSTEM_SUBSCRIBE_SERVICE_NAME,
+                callback_group=self._usb_sub_cb_group)
             while not self._usb_file_system_subscribe_client.wait_for_service(timeout_sec=1.0):
                 self.get_logger().info("File System Subscribe not available, waiting again...")
 
@@ -130,19 +130,17 @@ class BagLogNode(Node):
             # watched by model_loader_node is succesfully executed.
             self._usb_mpm_cb_group = ReentrantCallbackGroup()
             self._usb_mount_point_manager_client = self.create_client(USBMountPointManagerSrv,
-                                                                    constants.USB_MOUNT_POINT_MANAGER_SERVICE_NAME,
-                                                                    callback_group=self._usb_mpm_cb_group)
+                                                                      constants.USB_MOUNT_POINT_MANAGER_SERVICE_NAME,
+                                                                      callback_group=self._usb_mpm_cb_group)
             while not self._usb_mount_point_manager_client.wait_for_service(timeout_sec=1.0):
                 self.get_logger().info("USB mount point manager service not available, waiting again...")
 
             # Subscriber to USB File system notification publisher to recieve the broadcasted messages
             # with file/folder details, whenever a watched file is identified in the USB connected.
             self._usb_notif_cb_group = ReentrantCallbackGroup()
-            self._usb_file_system_notification_sub = self.create_subscription(USBFileSystemNotificationMsg,
-                                                                            constants.USB_FILE_SYSTEM_NOTIFICATION_TOPIC,
-                                                                            self._usb_file_system_notification_cb,
-                                                                            10,
-                                                                            callback_group=self._usb_notif_cb_group)
+            self._usb_file_system_notification_sub = self.create_subscription(
+                USBFileSystemNotificationMsg, constants.USB_FILE_SYSTEM_NOTIFICATION_TOPIC, self.
+                _usb_file_system_notification_cb, 10, callback_group=self._usb_notif_cb_group)
 
             # Add the "models" folder to the watchlist.
             usb_file_system_subscribe_request = USBFileSystemSubscribeSrv.Request()
@@ -179,17 +177,17 @@ class BagLogNode(Node):
     def _file_name_cb(self, filename_msg: String):
         try:
             if self._target_edit_state == RecordingState.Running:
-                    self._target_edit_state = RecordingState.Stopped
-                    self._change_gc.trigger()
-                    self.get_logger().info("Received new file name. Triggering stop of recording.")
-            
-            parts = filename_msg.data.split(os.pathsep)
+                self._target_edit_state = RecordingState.Stopped
+                self._change_gc.trigger()
+                self.get_logger().info("Received new file name. Triggering stop of recording.")
+
+            parts = filename_msg.data.split(os.sep)
             self._bag_name = parts[-2]
-            self.get_logger().info(f"New filename: {self._bag_name}")
+            self.get_logger().info(f"New filename received: {filename_msg.data} -> {self._bag_name}")
 
         except:  # noqa E722
             self.get_logger().error(traceback.format_stack())
-        
+
     def _usb_file_system_notification_cb(self, notification_msg):
         """Callback for messages triggered whenever usb_monitor_node identifies a file/folder
            thats being tracked.
