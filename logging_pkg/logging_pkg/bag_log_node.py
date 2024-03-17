@@ -6,7 +6,7 @@ import sys
 import time
 import os
 from enum import IntEnum
-from threading import Event
+from threading import Event, Lock
 from typing import List, Tuple
 import traceback
 
@@ -51,6 +51,7 @@ class BagLogNode(Node):
     _subscriptions: List[Subscription] = []
     _topics_type_info: List[Tuple[str, TopicEndpointInfo]] = []
     _topics_to_scan: List[str] = []
+    _bag_lock = Lock()
 
     def __init__(self):
         super().__init__('bag_log_node')
@@ -280,7 +281,9 @@ class BagLogNode(Node):
 
             # Check that we are running and that bag is open.
             if self._target_edit_state == RecordingState.Running and hasattr(self, '_bag_writer'):
+                self._bag_lock.acquire()
                 self._bag_writer.write(topic, msg, time_recv.nanoseconds)
+                self._bag_lock.release()
 
         except Exception as e:  # noqa E722
             self.get_logger().error(traceback.format_stack())
@@ -315,6 +318,8 @@ class BagLogNode(Node):
 
     def _start_bag(self):
 
+        self._bag_lock.acquire()
+
         serialization_format = 'cdr'
 
         bag_path = os.path.join(self._output_path, constants.LOGS_BAG_FOLDER_NAME_PATTERN.format(
@@ -333,6 +338,8 @@ class BagLogNode(Node):
 
         for topic_type_info in self._topics_type_info:
             self.create_topic(self._bag_writer, topic_type_info[0], topic_type_info[1])
+
+        self._bag_lock.release()
 
     def _stop_bag(self):
 
