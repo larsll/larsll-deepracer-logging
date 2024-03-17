@@ -84,7 +84,7 @@ class BagLogNode(Node):
         self._monitor_last_received = self.get_clock().now()
 
         self.declare_parameter(
-            'log_topics', [],
+            'log_topics', ['/ctrl_pkg/servo_msg'],
             ParameterDescriptor(type=ParameterType.PARAMETER_STRING_ARRAY))
         self._log_topics = self.get_parameter('log_topics').value
 
