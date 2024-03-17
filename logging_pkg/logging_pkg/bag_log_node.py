@@ -61,7 +61,7 @@ class BagLogNode(Node):
         self._output_path = self.get_parameter('output_path').value
 
         self.declare_parameter(
-            'monitor_usb', True,
+            'monitor_usb', False,
             ParameterDescriptor(type=ParameterType.PARAMETER_BOOL))
         self._monitor_usb = self.get_parameter('monitor_usb').value
 
