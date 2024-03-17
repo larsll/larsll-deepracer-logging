@@ -4,6 +4,7 @@ import logging
 import importlib
 import sys
 import time
+import os
 from enum import IntEnum
 from threading import Event
 from typing import List, Tuple
@@ -19,6 +20,13 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 import rosbag2_py
 from rcl_interfaces.msg import ParameterDescriptor, ParameterType
 
+from std_msgs.msg import String
+
+from deepracer_interfaces_pkg.srv import (USBFileSystemSubscribeSrv,
+                                          USBMountPointManagerSrv)
+from deepracer_interfaces_pkg.msg import USBFileSystemNotificationMsg
+
+import logging_pkg.constants as constants
 from logging_pkg.constants import (RecordingState)
 
 
@@ -48,14 +56,24 @@ class BagLogNode(Node):
         super().__init__('bag_log_node')
 
         self.declare_parameter(
-            'output_path', 'deepracer-bag-{}',
+            'output_path', constants.LOGS_DEFAULT_FOLDER,
             ParameterDescriptor(type=ParameterType.PARAMETER_STRING))
         self._output_path = self.get_parameter('output_path').value
+
+        self.declare_parameter(
+            'monitor_usb', True,
+            ParameterDescriptor(type=ParameterType.PARAMETER_BOOL))
+        self._monitor_usb = self.get_parameter('monitor_usb').value
 
         self.declare_parameter(
             'monitor_topic', '/inference_pkg/rl_results',
             ParameterDescriptor(type=ParameterType.PARAMETER_STRING))
         self._monitor_topic = self.get_parameter('monitor_topic').value
+
+        self.declare_parameter(
+            'file_name_topic', '/inference_pkg/model_name',
+            ParameterDescriptor(type=ParameterType.PARAMETER_STRING))
+        self._file_name_topic = self.get_parameter('file_name_topic').value
 
         self.declare_parameter(
             'monitor_topic_timeout', 1,
@@ -73,6 +91,8 @@ class BagLogNode(Node):
         if self._topics_to_scan.count(self._monitor_topic) > 0:
             self._topics_to_scan.remove(self._monitor_topic)
 
+        self._bag_name = constants.DEFAULT_BAG_NAME
+
     def __enter__(self):
 
         # Subscription to monitor topic.
@@ -83,12 +103,53 @@ class BagLogNode(Node):
         self._scan_timer = self.create_timer(1.0, callback=self._scan_for_topics_cb,
                                              callback_group=self._main_cbg)
 
-        # Change monitor
+        # Monitor changes
         self._change_gc = self.create_guard_condition(callback=self._change_cb,
                                                       callback_group=self._main_cbg)
 
         self.get_logger().info('Node started. Monitor \'{}\'. Additionally logging {}.'
                                .format(self._monitor_topic, str(self._topics_to_scan)))
+
+        # Create a subscription to the file name topic
+        self._file_name_sub = self.create_subscription(String, self._file_name_topic,
+                                                        self._file_name_cb, 1)
+
+        if self._monitor_usb:
+            # Client to USB File system subscription service that allows the node to add the "models"
+            # folder to the watchlist. The usb_monitor_node will trigger notification if it finds
+            # the files/folders from the watchlist in the USB drive.
+            self._usb_sub_cb_group = ReentrantCallbackGroup()
+            self._usb_file_system_subscribe_client = self.create_client(USBFileSystemSubscribeSrv,
+                                                                    constants.USB_FILE_SYSTEM_SUBSCRIBE_SERVICE_NAME,
+                                                                    callback_group=self._usb_sub_cb_group)
+            while not self._usb_file_system_subscribe_client.wait_for_service(timeout_sec=1.0):
+                self.get_logger().info("File System Subscribe not available, waiting again...")
+
+            # Client to USB Mount point manager service to indicate that the usb_monitor_node can safely
+            # decrement the counter for the mount point once the action function for the file/folder being
+            # watched by model_loader_node is succesfully executed.
+            self._usb_mpm_cb_group = ReentrantCallbackGroup()
+            self._usb_mount_point_manager_client = self.create_client(USBMountPointManagerSrv,
+                                                                    constants.USB_MOUNT_POINT_MANAGER_SERVICE_NAME,
+                                                                    callback_group=self._usb_mpm_cb_group)
+            while not self._usb_mount_point_manager_client.wait_for_service(timeout_sec=1.0):
+                self.get_logger().info("USB mount point manager service not available, waiting again...")
+
+            # Subscriber to USB File system notification publisher to recieve the broadcasted messages
+            # with file/folder details, whenever a watched file is identified in the USB connected.
+            self._usb_notif_cb_group = ReentrantCallbackGroup()
+            self._usb_file_system_notification_sub = self.create_subscription(USBFileSystemNotificationMsg,
+                                                                            constants.USB_FILE_SYSTEM_NOTIFICATION_TOPIC,
+                                                                            self._usb_file_system_notification_cb,
+                                                                            10,
+                                                                            callback_group=self._usb_notif_cb_group)
+
+            # Add the "models" folder to the watchlist.
+            usb_file_system_subscribe_request = USBFileSystemSubscribeSrv.Request()
+            usb_file_system_subscribe_request.file_name = constants.LOGS_SOURCE_LEAF_DIRECTORY
+            usb_file_system_subscribe_request.callback_name = constants.LOGS_DIR_CB
+            usb_file_system_subscribe_request.verify_name_exists = True
+            self._usb_file_system_subscribe_client.call_async(usb_file_system_subscribe_request)
 
         return self
 
@@ -114,6 +175,38 @@ class BagLogNode(Node):
             self.get_logger().error(traceback.format_stack())
         finally:
             self.get_logger().info('Node cleanup done. Exiting.')
+
+    def _file_name_cb(self, filename_msg: String):
+        try:
+            if self._target_edit_state == RecordingState.Running:
+                    self._target_edit_state = RecordingState.Stopped
+                    self._change_gc.trigger()
+                    self.get_logger().info("Received new file name. Triggering stop of recording.")
+            
+            parts = filename_msg.data.split(os.pathsep)
+            self._bag_name = parts[-2]
+            self.get_logger().info(f"New filename: {self._bag_name}")
+
+        except:  # noqa E722
+            self.get_logger().error(traceback.format_stack())
+        
+    def _usb_file_system_notification_cb(self, notification_msg):
+        """Callback for messages triggered whenever usb_monitor_node identifies a file/folder
+           thats being tracked.
+
+        Args:
+            notification_msg (USBFileSystemNotificationMsg): Message containing information about the
+                                                             file identified by the usb_monitor_node.
+        """
+        self.get_logger().info("File system notification:"
+                               f" {notification_msg.path}"
+                               f" {notification_msg.file_name}"
+                               f" {notification_msg.node_name}"
+                               f" {notification_msg.callback_name}")
+        if notification_msg.file_name == constants.LOGS_SOURCE_LEAF_DIRECTORY and \
+           notification_msg.callback_name == constants.LOGS_DIR_CB:
+            self._output_path = os.path.join(notification_msg.path, notification_msg.file_name)
+            self.get_logger().info(f"New output path: {self._output_path}")
 
     def _scan_for_topics_cb(self):
         """Method that is called by self._scan_timer to check if the monitor topic
@@ -166,12 +259,12 @@ class BagLogNode(Node):
 
         self._subscriptions.append(self.create_subscription(
             topic_class, topic_name,
-            lambda msg: self._receive_monitor_callback(msg, topic=topic_name),
+            lambda msg: self._receive_topic_callback(msg, topic=topic_name),
             qos_profile=topic_sub_qos,
             callback_group=self._main_cbg, raw=True))
         self._topics_type_info.append((topic_name, topic_endpoint))
 
-    def _receive_monitor_callback(self, msg, topic):
+    def _receive_topic_callback(self, msg, topic):
         """ All messages are received in this single callback.
             As subscriptions are raw we cannot review the messages, they
             are directly written to the bag!
@@ -193,7 +286,7 @@ class BagLogNode(Node):
 
         except Exception as e:  # noqa E722
             self.get_logger().error(traceback.format_stack())
-            self.get_logger().error("{} occurred in _receive_monitor_callback.".format(sys.exc_info()[0]))
+            self.get_logger().error("{} occurred in _receive_topic_callback.".format(sys.exc_info()[0]))
 
     def _timeout_check_timer_cb(self):
         try:
@@ -226,10 +319,10 @@ class BagLogNode(Node):
 
         serialization_format = 'cdr'
 
-        if "{}" in self._output_path:
-            bag_path = self._output_path.format(time.strftime("%Y%m%d-%H%M%S"))
-        else:
-            bag_path = self._output_path
+        bag_path = os.path.join(self._output_path, constants.LOGS_BAG_FOLDER_NAME_PATTERN.format(
+            self._bag_name, time.strftime("%Y%m%d-%H%M%S")))
+        if not os.path.exists(self._output_path):
+            os.makedirs(self._output_path)
 
         converter_options = rosbag2_py.ConverterOptions(
             input_serialization_format=serialization_format,
