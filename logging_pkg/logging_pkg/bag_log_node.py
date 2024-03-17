@@ -376,8 +376,9 @@ def main(args=None):
         pass
     except:  # noqa: E722
         logging.exception("Error in Node")
-
-    rclpy.shutdown()
+    finally:
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":
