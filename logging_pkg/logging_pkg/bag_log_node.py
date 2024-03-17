@@ -48,7 +48,7 @@ class BagLogNode(Node):
     _target_edit_state = RecordingState.Stopped
     _state = NodeState.Starting
 
-    _subscriptions: List[Subscription] = []
+    _topic_subscriptions: List[Subscription] = []
     _topics_type_info: List[Tuple[str, TopicEndpointInfo]] = []
     _topics_to_scan: List[str] = []
     _bag_lock = Lock()
@@ -167,7 +167,7 @@ class BagLogNode(Node):
             if hasattr(self, '_timeout_check_timer'):
                 self._timeout_check_timer.destroy()
 
-            for sub in self._subscriptions:
+            for sub in self._topic_subscriptions:
                 sub.destroy()
 
         except:  # noqa E722
@@ -256,7 +256,7 @@ class BagLogNode(Node):
         topic_sub_qos.reliability = topic_endpoint.qos_profile.reliability
         topic_sub_qos.history = HistoryPolicy.KEEP_ALL
 
-        self._subscriptions.append(self.create_subscription(
+        self._topic_subscriptions.append(self.create_subscription(
             topic_class, topic_name,
             lambda msg: self._receive_topic_callback(msg, topic=topic_name),
             qos_profile=topic_sub_qos,
