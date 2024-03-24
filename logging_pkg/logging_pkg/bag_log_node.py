@@ -5,7 +5,7 @@ import importlib
 import sys
 import time
 import os
-from enum import IntEnum
+from enum import Enum, IntEnum
 from threading import Event, Lock
 from typing import List, Tuple
 import traceback
@@ -41,8 +41,38 @@ class NodeState(IntEnum):
     Error = 3
 
 
+class LoggingMode(Enum):
+    """ Status of node
+    Extends:
+        Enum
+    """
+    Never = 0
+    USBOnly = 1
+    Always = 2
+
+    @classmethod
+    def _missing_name_(cls, name):
+        for member in cls:
+            if member.name.lower() == name.lower():
+                return member
+
+
 class BagLogNode(Node):
-    """ This node is used to log a topic to a rosbag2.
+    """This node is used to log a topic to a rosbag2.
+
+    The `BagLogNode` class is responsible for logging a specified topic to a rosbag2 file.
+    It provides functionality to monitor changes in the topic, start and stop the recording,
+    and handle USB file system notifications.
+
+    Attributes:
+        _shutdown (Event): An event to signal the shutdown of the node.
+        _target_edit_state (RecordingState): The target state of the recording (Running or Stopped).
+        _state (NodeState): The current state of the node (Starting, Scanning, or Running).
+        _topic_subscriptions (List[Subscription]): A list of topic subscriptions.
+        _topics_type_info (List[Tuple[str, TopicEndpointInfo]]): A list of topic names and their type information.
+        _topics_to_scan (List[str]): A list of topics to scan for.
+        _bag_lock (Lock): A lock to ensure thread safety when accessing the rosbag2 file.
+
     """
     _shutdown = Event()
     _target_edit_state = RecordingState.Stopped
@@ -53,6 +83,8 @@ class BagLogNode(Node):
     _topics_to_scan: List[str] = []
     _bag_lock = Lock()
 
+    _usb_path = False
+
     def __init__(self):
         super().__init__('bag_log_node')
 
@@ -62,9 +94,14 @@ class BagLogNode(Node):
         self._output_path = self.get_parameter('output_path').value
 
         self.declare_parameter(
-            'monitor_usb', False,
+            'disable_usb_monitor', False,
             ParameterDescriptor(type=ParameterType.PARAMETER_BOOL))
-        self._monitor_usb = self.get_parameter('monitor_usb').value
+        self._disable_usb_monitor = self.get_parameter('disable_usb_monitor').value
+
+        self.declare_parameter(
+            'logging_mode', "Always",
+            ParameterDescriptor(type=ParameterType.PARAMETER_STRING))      
+        self._logging_mode = LoggingMode(self.get_parameter('logging_mode').value)
 
         self.declare_parameter(
             'monitor_topic', '/inference_pkg/rl_results',
@@ -115,7 +152,7 @@ class BagLogNode(Node):
         self._file_name_sub = self.create_subscription(String, self._file_name_topic,
                                                        self._file_name_cb, 1)
 
-        if self._monitor_usb:
+        if not self._disable_usb_monitor:
             # Client to USB File system subscription service that allows the node to add the "models"
             # folder to the watchlist. The usb_monitor_node will trigger notification if it finds
             # the files/folders from the watchlist in the USB drive.
@@ -204,6 +241,7 @@ class BagLogNode(Node):
                                f" {notification_msg.callback_name}")
         if notification_msg.file_name == constants.LOGS_SOURCE_LEAF_DIRECTORY and \
            notification_msg.callback_name == constants.LOGS_DIR_CB:
+            self._usb_path = True
             self._output_path = os.path.join(notification_msg.path, notification_msg.file_name)
             self.get_logger().info(f"New output path: {self._output_path}")
 
@@ -275,6 +313,15 @@ class BagLogNode(Node):
             if topic == self._monitor_topic:
                 self._monitor_last_received = time_recv
                 if self._target_edit_state == RecordingState.Stopped:
+                    
+                    if self._logging_mode == LoggingMode.Never:
+                        self.get_logger().warn("Got callback from {}. Not logging as LoggingMode is Never.". format(self._monitor_topic))
+                        return
+
+                    if self._logging_mode == LoggingMode.USBOnly and self._usb_path == False:
+                        self.get_logger().info("Got callback from {}. Not logging as USB is not connected.". format(self._monitor_topic))
+                        return
+                    
                     self._target_edit_state = RecordingState.Running
                     self._change_gc.trigger()
                     self.get_logger().info("Got callback from {}. Triggering start.". format(self._monitor_topic))
