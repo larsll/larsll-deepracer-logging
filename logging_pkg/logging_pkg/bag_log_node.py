@@ -51,9 +51,9 @@ class LoggingMode(Enum):
     Always = 2
 
     @classmethod
-    def _missing_name_(cls, name):
+    def _missing_(cls, name_):
         for member in cls:
-            if member.name.lower() == name.lower():
+            if member.name.lower() == name_.lower():
                 return member
 
 
