@@ -137,9 +137,10 @@ class BagLogNode(Node):
         self._main_cbg = ReentrantCallbackGroup()
 
         # Start the scan
-        self._state = NodeState.Scanning
-        self._scan_timer = self.create_timer(1.0, callback=self._scan_for_topics_cb,
-                                             callback_group=self._main_cbg)
+        if self._logging_mode == LoggingMode.Always:
+            self._state = NodeState.Scanning
+            self._scan_timer = self.create_timer(1.0, callback=self._scan_for_topics_cb,
+                                                callback_group=self._main_cbg)
 
         # Monitor changes
         self._change_gc = self.create_guard_condition(callback=self._change_cb,
@@ -241,10 +242,15 @@ class BagLogNode(Node):
                                f" {notification_msg.callback_name}")
         if notification_msg.file_name == constants.LOGS_SOURCE_LEAF_DIRECTORY and \
            notification_msg.callback_name == constants.LOGS_DIR_CB:
-            self._usb_path = True
             self._output_path = os.path.join(notification_msg.path, notification_msg.file_name)
             self.get_logger().info(f"New output path: {self._output_path}")
 
+        if self._logging_mode == LoggingMode.USBOnly and self._state == NodeState.Starting:
+            self.get_logger().info("USB folder mounted, starting scanning for topics.")
+            self._state = NodeState.Scanning
+            self._scan_timer = self.create_timer(1.0, callback=self._scan_for_topics_cb,
+                                                callback_group=self._main_cbg)
+            
     def _scan_for_topics_cb(self):
         """Method that is called by self._scan_timer to check if the monitor topic
         is available. If yes it will trigger the startup procedure.
@@ -313,15 +319,6 @@ class BagLogNode(Node):
             if topic == self._monitor_topic:
                 self._monitor_last_received = time_recv
                 if self._target_edit_state == RecordingState.Stopped:
-                    
-                    if self._logging_mode == LoggingMode.Never:
-                        self.get_logger().warn("Got callback from {}. Not logging as LoggingMode is Never.". format(self._monitor_topic))
-                        return
-
-                    if self._logging_mode == LoggingMode.USBOnly and self._usb_path == False:
-                        self.get_logger().info("Got callback from {}. Not logging as USB is not connected.". format(self._monitor_topic))
-                        return
-                    
                     self._target_edit_state = RecordingState.Running
                     self._change_gc.trigger()
                     self.get_logger().info("Got callback from {}. Triggering start.". format(self._monitor_topic))
