@@ -1,10 +1,10 @@
 import argparse
 import datetime
 import json
-import logging
 import os
 from functools import partial
 from multiprocessing import Pool, cpu_count
+from typing import List, Dict, Tuple
 
 import cv2
 
@@ -31,18 +31,18 @@ WIDTH = 900
 HEIGHT = 600
 
 
-def get_rosbag_options(path, serialization_format='cdr'):
+def get_rosbag_options(path: str, serialization_format: str = 'cdr') -> Tuple[rosbag2_py.StorageOptions, rosbag2_py.ConverterOptions]:
     """
-    Get the storage and converter options for a ROS bag file.
+    Get the ROS bag options for a given path and serialization format.
 
     Args:
         path (str): The path to the ROS bag file.
         serialization_format (str, optional): The serialization format to use. Defaults to 'cdr'.
 
     Returns:
-        tuple: A tuple containing the storage options and converter options.
-
+        Tuple[rosbag2_py.StorageOptions, rosbag2_py.ConverterOptions]: A tuple containing the storage options and converter options.
     """
+
     storage_options = rosbag2_py.StorageOptions(uri=path, storage_id='sqlite3')
 
     converter_options = rosbag2_py.ConverterOptions(
@@ -52,7 +52,7 @@ def get_rosbag_options(path, serialization_format='cdr'):
     return storage_options, converter_options
 
 
-def create_plot(action_names, height, width, dpi):
+def create_plot(action_names: List[str], height: float, width: float, dpi: int) -> matplotlib.figure.Figure:
     """
     Create a plot with four subplots using matplotlib.
 
@@ -93,21 +93,23 @@ def create_plot(action_names, height, width, dpi):
     return fig
 
 
-def update_plot(fig: Figure, step, action_names, img, gradcam):
+def update_plot(
+        fig: Figure, step: Dict, action_names: List[str],
+        img: np.ndarray, gradcam: np.ndarray) -> np.ndarray:
     """
-    Update the plot with the given data.
+    Update the plot with the given data and images.
 
     Args:
         fig (Figure): The matplotlib figure object.
-        step: The step data.
-        action_names: The list of action names.
-        img: The image data.
-        gradcam: The gradcam data.
+        step (Dict): A dictionary containing the step data.
+        action_names (List[str]): A list of action names.
+        img (np.ndarray): The image to be displayed in the first subplot.
+        gradcam (np.ndarray): The gradcam image to be displayed in the second subplot.
 
     Returns:
-        np.ndarray: The updated plot as a BGR image.
-    """
+        np.ndarray: The updated plot as a cv2 BGR image.
 
+    """
     x = list(range(0, len(action_names)))
 
     car_result = pd.DataFrame(step['car_results'])
@@ -132,22 +134,24 @@ def update_plot(fig: Figure, step, action_names, img, gradcam):
     return cv2.cvtColor(np.frombuffer(buf, dtype=np.uint8).reshape(nrows, ncols, 4), cv2.COLOR_RGBA2BGR)
 
 
-def create_img(step, img, grad_img, action_names, height, width):
+def create_img(
+        step: Dict, img: np.ndarray, grad_img: np.ndarray, action_names: List[str],
+        height: int, width: int) -> np.ndarray:
     """
-    Create an image with multiple subplots showing various visualizations.
+    Create an image with multiple plots and return it as a cv2 MatLike object.
 
     Args:
-        step (dict): A dictionary containing step information.
-        img (numpy.ndarray): The input image.
-        grad_img (numpy.ndarray): The gradient image.
-        action_names (list): A list of action names.
-        height (int): The height of the plot.
-        width (int): The width of the plot.
+        step (Dict): A dictionary containing step information.
+        img (np.ndarray): The input image to be displayed in the first plot.
+        grad_img (np.ndarray): The gradient image to be displayed in the second plot.
+        action_names (List[str]): A list of action names.
+        height (int): The height of the resulting image.
+        width (int): The width of the resulting image.
 
     Returns:
-        numpy.ndarray: The image with subplots.
-
+        np.ndarray: The resulting image as a cv2 MatLike object.
     """
+
     fig = create_plot(action_names, height, width, 72)
 
     x = list(range(0, len(action_names)))
@@ -175,20 +179,21 @@ def create_img(step, img, grad_img, action_names, height, width):
     return cv2.cvtColor(np.frombuffer(buf, dtype=np.uint8).reshape(nrows, ncols, 4), cv2.COLOR_RGBA2BGR)
 
 
-def process_data(data, start_time: float, cam: GradCam):
+def process_data(data: bytes, start_time: float, cam: GradCam) -> Tuple[Dict, np.ndarray, np.ndarray]:
     """
     Process data from a bag file.
 
     Args:
-        data: The data to be processed.
+        data (bytes): The data to process.
         start_time (float): The start time of the data.
         cam (GradCam): The GradCam object used for image processing.
 
     Returns:
-        tuple: A tuple containing the processed step, the original image, and the GradCam image.
+        Tuple[Dict, np.ndarray, np.ndarray]: A tuple containing the processed data, the original image,
+        and the processed image.
 
     Raises:
-        Exception: If an error occurs during processing.
+        Exception: If an error occurs during the processing.
 
     """
     try:
@@ -234,7 +239,7 @@ def process_data(data, start_time: float, cam: GradCam):
         print(e)
 
 
-def get_reader(bag_path) -> rosbag2_py.SequentialReader:
+def get_reader(bag_path: str) -> rosbag2_py.SequentialReader:
     """
     Returns a SequentialReader object for reading a ROS bag file.
 
@@ -254,7 +259,7 @@ def get_reader(bag_path) -> rosbag2_py.SequentialReader:
     return reader
 
 
-def analyze_bag(bag_path) -> dict:
+def analyze_bag(bag_path: str) -> Dict:
     """
     Analyzes a bag file and returns information about the bag.
 
@@ -316,11 +321,10 @@ def analyze_bag(bag_path) -> dict:
     print("Elapsed time: {:.2f} seconds".format(bag_info['elapsed_time']))
     print("Average FPS: {:.1f}".format(bag_info['fps']))
     print("Action Space: {} actions".format(bag_info['action_space_size']))
-    print(
-        "Input image: {}x{}, {} channels.".format(
-            bag_info['image_shape'][1],
-            bag_info['image_shape'][0],
-            bag_info['image_shape'][2]))
+    print("Input image: {}x{}, {} channels.".format(
+        bag_info['image_shape'][1],
+        bag_info['image_shape'][0],
+        bag_info['image_shape'][2]))
     print("Total messages: {}, expected duration: {:.1f}".format(
         bag_info['total_frames'], bag_info['total_frames']/bag_info['fps']))
 
@@ -354,6 +358,7 @@ def main():
     parser.add_argument("--codec", help="The codec for the video writer", default="avc1")
     parser.add_argument("--bag_path", help="The path to the rosbag file", required=True)
     parser.add_argument("--model_path", help="The path to the model directory", required=True)
+    parser.add_argument("--frame_limit", help="Max number of frames to process", default=None)
 
     args = parser.parse_args()
 
@@ -377,6 +382,11 @@ def main():
     metadata = ModelMetadata.from_file(metadata_json)
     model = Model.from_file(model_pb_path=model_pb, metadata=metadata, log_device_placement=False)
 
+    if args.frame_limit:
+        frame_limit = float(args.frame_limit)
+    else:
+        frame_limit = float("inf")
+
     action_names = []
     with open(metadata_json, "r") as jsonin:
         model_metadata = json.load(jsonin)
@@ -399,8 +409,8 @@ def main():
             cam = GradCam(model, model.get_conv_outputs())
             reader = get_reader(bag_path)
 
-            pbar = tqdm(total=bag_info['total_frames'], desc="Loading messages", unit="messages")
-            while reader.has_next() and s < 60:
+            pbar = tqdm(total=min(bag_info['total_frames'], frame_limit), desc="Loading messages", unit="messages")
+            while reader.has_next() and s < frame_limit:
 
                 (_, data, _) = reader.read_next()
                 step, img, grad_img = process_data(data, start_time=bag_info['start_time'], cam=cam)
@@ -411,7 +421,7 @@ def main():
 
             pbar.close()
 
-        pbar = tqdm(total=bag_info['total_frames'], desc="Writing image frames", unit="frames")
+        pbar = tqdm(total=min(bag_info['total_frames'], frame_limit), desc="Writing image frames", unit="frames")
         for res in async_results:
             writer.write(res.get())
             pbar.update(1)
