@@ -375,7 +375,7 @@ def main():
     if not os.path.exists(model_pb):
         raise FileNotFoundError(f"Model file '{model_pb}' does not exist.")
 
-    bag_path = args.bag_path
+    bag_path = args.bag_path.rstrip('/')
     if not os.path.exists(bag_path):
         raise FileNotFoundError(f"Bag directory '{bag_path}' does not exist.")
 
