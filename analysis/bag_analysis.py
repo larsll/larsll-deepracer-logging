@@ -27,8 +27,8 @@ from deepracer_interfaces_pkg.msg import InferResultsArray
 matplotlib.use("Agg")
 
 bridge = CvBridge()
-WIDTH = 900
-HEIGHT = 600
+WIDTH = 1280
+HEIGHT = 720
 
 
 def get_rosbag_options(path: str, serialization_format: str = 'cdr') -> Tuple[rosbag2_py.StorageOptions, rosbag2_py.ConverterOptions]:
@@ -52,7 +52,7 @@ def get_rosbag_options(path: str, serialization_format: str = 'cdr') -> Tuple[ro
     return storage_options, converter_options
 
 
-def create_plot(action_names: List[str], height: float, width: float, dpi: int) -> matplotlib.figure.Figure:
+def create_plot(action_names: List[str], height: float, width: float, dpi: int, title: str) -> matplotlib.figure.Figure:
     """
     Create a plot with four subplots using matplotlib.
 
@@ -67,81 +67,50 @@ def create_plot(action_names: List[str], height: float, width: float, dpi: int) 
     """
 
     fig = plt.figure(figsize=(width/dpi, height/dpi), dpi=dpi)
+    fig.set_facecolor('black')
+    fig.suptitle(title, color='white', fontsize=20)
+    
     x = list(range(0, len(action_names)))
 
-    spec = gridspec.GridSpec(ncols=2, nrows=2,
-                             width_ratios=[1, 1], wspace=0.1,
-                             hspace=0.1, height_ratios=[3, 1], left=0.05, right=0.95, top=0.99, bottom=0.2)
-    ax0 = fig.add_subplot(spec[0])
-    plt.setp(ax0, xlabel="Original")
-    plt.tick_params(labelleft=False, labelbottom=False)
-    ax1 = fig.add_subplot(spec[1])
-    plt.setp(ax1, xlabel="GradCam")
-    plt.tick_params(labelleft=False, labelbottom=False)
+    spec = gridspec.GridSpec(ncols=4, nrows=2,
+                             width_ratios=[1, 1, 1, 1], wspace=0.1,
+                             hspace=0.1, height_ratios=[3.5, 1], left=0.05, right=0.95, top=0.95, bottom=0.15)
+    ax0 = fig.add_subplot(spec[0, :-2])
+    ax0.set_xticks([])
+    ax0.set_yticks([])
+    for spine in ax0.spines.values():
+        spine.set_edgecolor('white')      
+        spine.set_linewidth(1.5)
+    
+    ax1 = fig.add_subplot(spec[0, -2:])
+    ax1.set_xticks([])
+    ax1.set_yticks([])
+    for spine in ax1.spines.values():
+        spine.set_edgecolor('white')      
+        spine.set_linewidth(1.5)
 
-    ax2 = fig.add_subplot(spec[2])
+    ax2 = fig.add_subplot(spec[1, :])
     ax2.set_ylim(0.0, 1.0)
-    plt.setp(ax2, xlabel="OpenVINO")
-    plt.xticks(x, action_names[::-1], rotation='vertical')
+    ax2.set_facecolor('black')
+    for spine in ax2.spines.values():
+        spine.set_edgecolor('white')      
+        spine.set_linewidth(1.5)
 
-    ax3 = fig.add_subplot(spec[3], sharey=ax2)
-    ax3.set_ylim(0.0, 1.0)
-    plt.setp(ax3, xlabel="Tensorflow")
-    plt.xticks(x, action_names[::-1], rotation='vertical')
+    plt.xticks(x, action_names[::-1], rotation='vertical', color='white', fontsize=15)
+
     fig.canvas.draw()
 
     return fig
 
-
-def update_plot(
-        fig: Figure, step: Dict, action_names: List[str],
-        img: np.ndarray, gradcam: np.ndarray) -> np.ndarray:
-    """
-    Update the plot with the given data and images.
-
-    Args:
-        fig (Figure): The matplotlib figure object.
-        step (Dict): A dictionary containing the step data.
-        action_names (List[str]): A list of action names.
-        img (np.ndarray): The image to be displayed in the first subplot.
-        gradcam (np.ndarray): The gradcam image to be displayed in the second subplot.
-
-    Returns:
-        np.ndarray: The updated plot as a cv2 BGR image.
-
-    """
-    x = list(range(0, len(action_names)))
-
-    car_result = pd.DataFrame(step['car_results'])
-    tf_result = pd.DataFrame(step['tf_results'])
-
-    ax = fig.get_axes()
-
-    for a in ax:
-        for p in set(a.containers):
-            p.remove()
-        for i in set(a.images):
-            i.remove()
-
-    ax[0].imshow(img)
-    ax[1].imshow(gradcam)
-    ax[2].bar(x, car_result['probability'][::-1], color='blue')
-    ax[3].bar(x, tf_result['probability'][::-1], color='blue')
-    fig.canvas.draw()
-
-    buf = fig.canvas.buffer_rgba()
-    ncols, nrows = fig.canvas.get_width_height()
-    return cv2.cvtColor(np.frombuffer(buf, dtype=np.uint8).reshape(nrows, ncols, 4), cv2.COLOR_RGBA2BGR)
-
-
 def create_img(
-        step: Dict, img: np.ndarray, grad_img: np.ndarray, action_names: List[str],
+        step: Dict, bag_info: Dict, img: np.ndarray, grad_img: np.ndarray, action_names: List[str],
         height: int, width: int) -> np.ndarray:
     """
     Create an image with multiple plots and return it as a cv2 MatLike object.
 
     Args:
         step (Dict): A dictionary containing step information.
+        bag_info (Dict): A dictionary containing information about the bag file.
         img (np.ndarray): The input image to be displayed in the first plot.
         grad_img (np.ndarray): The gradient image to be displayed in the second plot.
         action_names (List[str]): A list of action names.
@@ -152,12 +121,12 @@ def create_img(
         np.ndarray: The resulting image as a cv2 MatLike object.
     """
 
-    fig = create_plot(action_names, height, width, 72)
+    timestamp_formatted = "{:02}:{:05.2f}".format(int(step['timestamp'] // 60), step['timestamp'] % 60)
+    fig = create_plot(action_names, height, width, 72, title="{} - {} / {}".format(bag_info['name'], timestamp_formatted, step['seq_0']))
 
     x = list(range(0, len(action_names)))
 
     car_result = pd.DataFrame(step['car_results'])
-    tf_result = pd.DataFrame(step['tf_results'])
 
     ax = fig.get_axes()
 
@@ -169,23 +138,32 @@ def create_img(
 
     ax[0].imshow(img)
     ax[1].imshow(grad_img)
-    ax[2].bar(x, car_result['probability'][::-1], color='blue')
-    ax[3].bar(x, tf_result['probability'][::-1], color='blue')
+    # Highlight the highest bar in a different color
+    bar_colors = ['#95d0fc'] * len(car_result['probability'])
+    max_index = car_result['probability'].idxmax()
+    bar_colors[max_index] = '#1f77b4'  # Darker tone similar to '#95d0fc'
+
+    ax[2].bar(x, car_result['probability'][::-1], color=bar_colors[::-1])
+
     fig.canvas.draw()
 
     buf = fig.canvas.buffer_rgba()
     ncols, nrows = fig.canvas.get_width_height()
     plt.close(fig)
-    return cv2.cvtColor(np.frombuffer(buf, dtype=np.uint8).reshape(nrows, ncols, 4), cv2.COLOR_RGBA2BGR)
+    img = cv2.cvtColor(np.frombuffer(buf, dtype=np.uint8).reshape(nrows, ncols, 4), cv2.COLOR_RGBA2BGR)
+    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 90]  # Adjust the quality as needed
+    _, encimg = cv2.imencode('.jpg', img, encode_param)
+    return encimg
 
 
-def process_data(data: bytes, start_time: float, cam: GradCam) -> Tuple[Dict, np.ndarray, np.ndarray]:
+def process_data(data: bytes, start_time: float, seq: int, cam: GradCam) -> Tuple[Dict, np.ndarray, np.ndarray]:
     """
     Process data from a bag file.
 
     Args:
         data (bytes): The data to process.
         start_time (float): The start time of the data.
+        start_seq (int): The number of the first frame of the data.
         cam (GradCam): The GradCam object used for image processing.
 
     Returns:
@@ -207,6 +185,7 @@ def process_data(data: bytes, start_time: float, cam: GradCam) -> Tuple[Dict, np
 
         step['timestamp'] = timestamp
         step['seq'] = int(msg.images[0].header.frame_id)
+        step['seq_0'] = seq
 
         # Extract original image from first camera
         cv_img = bridge.compressed_imgmsg_to_cv2(msg.images[0], desired_encoding="passthrough")
@@ -308,6 +287,7 @@ def analyze_bag(bag_path: str) -> Dict:
     step_diff = df['seq'].max() - df['seq'].min()
     tmp_img = bridge.compressed_imgmsg_to_cv2(msg.images[0], desired_encoding="passthrough")
 
+    bag_info['name'] = os.path.basename(bag_path)
     bag_info['start_time'] = first_stamp
     bag_info['fps'] = step_diff / df['timestamp'].max()
     bag_info['total_frames'] = s
@@ -359,6 +339,7 @@ def main():
     parser.add_argument("--bag_path", help="The path to the rosbag file", required=True)
     parser.add_argument("--model_path", help="The path to the model directory", required=True)
     parser.add_argument("--frame_limit", help="Max number of frames to process", default=None)
+    parser.add_argument("--describe", help="Describe the actions", default=False)
 
     args = parser.parse_args()
 
@@ -413,8 +394,8 @@ def main():
             while reader.has_next() and s < frame_limit:
 
                 (_, data, _) = reader.read_next()
-                step, img, grad_img = process_data(data, start_time=bag_info['start_time'], cam=cam)
-                async_results.append(pool.apply_async(create_img, (step, img, grad_img, action_names, HEIGHT, WIDTH)))
+                step, img, grad_img = process_data(data, start_time=bag_info['start_time'], seq=s, cam=cam)
+                async_results.append(pool.apply_async(create_img, (step, bag_info, img, grad_img, action_names, HEIGHT, WIDTH)))
                 steps_data['steps'].append(step)
                 s += 1
                 pbar.update(1)
@@ -423,7 +404,8 @@ def main():
 
         pbar = tqdm(total=min(bag_info['total_frames'], frame_limit), desc="Writing image frames", unit="frames")
         for res in async_results:
-            writer.write(res.get())
+            encimg = res.get()
+            writer.write(cv2.imdecode(np.frombuffer(encimg, dtype=np.uint8), cv2.IMREAD_COLOR))
             pbar.update(1)
         pbar.close()
 
@@ -439,12 +421,15 @@ def main():
     print("Duration: {:.2f} seconds".format(df['timestamp'].max()))
     print("Average FPS: {:.1f}".format(fps))
     print("Action Space: {} actions".format(len(action_names)))
+    print("Video file: {}".format(output_file))
 
     df['action_agree'] = np.where(df['car_action.action'] == df['tf_action.action'], 1, 0)
     df['action_diff'] = np.abs(df['car_action.action'] - df['tf_action.action'])
-    action_analysis = df[['timestamp', 'seq', 'car_action.action', 'car_action.probability',
-                          'tf_action.action', 'tf_action.probability', 'action_agree', 'action_diff']]
-    print(action_analysis.describe())
+    
+    if args.describe:
+        action_analysis = df[['timestamp', 'seq', 'car_action.action', 'tf_action.action', 
+                            'car_action.probability', 'tf_action.probability', 'action_agree', 'action_diff']]
+        print(action_analysis.describe())
 
 
 if __name__ == "__main__":
