@@ -359,9 +359,14 @@ def main():
     bag_path = args.bag_path.rstrip('/')
     if not os.path.exists(bag_path):
         raise FileNotFoundError(f"Bag directory '{bag_path}' does not exist.")
+    else:
+        print(f"Processing bag file: {bag_path}")
 
     metadata = ModelMetadata.from_file(metadata_json)
     model = Model.from_file(model_pb_path=model_pb, metadata=metadata, log_device_placement=False)
+
+    print("Using model: {}".format(model_path))
+    print("")
 
     if args.frame_limit:
         frame_limit = float(args.frame_limit)
@@ -373,8 +378,9 @@ def main():
         model_metadata = json.load(jsonin)
     for action in model_metadata['action_space']:
         action_names.append(str(action['steering_angle']) + u'\N{DEGREE SIGN}' + " "+"%.1f" % action["speed"])
-
     bag_info = analyze_bag(bag_path)
+    print("")
+    print("Analysed file. Starting processing...")
 
     CODEC = args.codec
     output_file = "{}.mp4".format(bag_path)
@@ -385,31 +391,43 @@ def main():
     steps_data = {'steps': []}
     async_results = []
 
-    with Pool(min(cpu_count()-2, 10)) as pool:
-        with model.session as sess:
-            cam = GradCam(model, model.get_conv_outputs())
-            reader = get_reader(bag_path)
+    try:
+        with Pool(min(cpu_count()-2, 10)) as pool:
+            with model.session as sess:
+                cam = GradCam(model, model.get_conv_outputs())
+                reader = get_reader(bag_path)
 
-            pbar = tqdm(total=min(bag_info['total_frames'], frame_limit), desc="Loading messages", unit="messages")
-            while reader.has_next() and s < frame_limit:
+                pbar = tqdm(total=min(bag_info['total_frames'], frame_limit), desc="Loading messages", unit="messages")
+                while reader.has_next() and s < frame_limit:
+                    try:
+                        (_, data, _) = reader.read_next()
+                        step, img, grad_img = process_data(data, start_time=bag_info['start_time'], seq=s, cam=cam)
+                        async_results.append(pool.apply_async(create_img, (step, bag_info, img, grad_img, action_names, HEIGHT, WIDTH)))
+                        steps_data['steps'].append(step)
+                        s += 1
+                        pbar.update(1)
+                    except Exception as e:
+                        print(f"Error processing data: {e}")
+                        raise
 
-                (_, data, _) = reader.read_next()
-                step, img, grad_img = process_data(data, start_time=bag_info['start_time'], seq=s, cam=cam)
-                async_results.append(pool.apply_async(create_img, (step, bag_info, img, grad_img, action_names, HEIGHT, WIDTH)))
-                steps_data['steps'].append(step)
-                s += 1
-                pbar.update(1)
+                pbar.close()
+
+            pbar = tqdm(total=min(bag_info['total_frames'], frame_limit), desc="Writing image frames", unit="frames")
+            for res in async_results:
+                try:
+                    encimg = res.get()
+                    writer.write(cv2.imdecode(np.frombuffer(encimg, dtype=np.uint8), cv2.IMREAD_COLOR))
+                    pbar.update(1)
+                except Exception as e:
+                    print(f"Error writing frame: {e}")
+                    raise
 
             pbar.close()
 
-        pbar = tqdm(total=min(bag_info['total_frames'], frame_limit), desc="Writing image frames", unit="frames")
-        for res in async_results:
-            encimg = res.get()
-            writer.write(cv2.imdecode(np.frombuffer(encimg, dtype=np.uint8), cv2.IMREAD_COLOR))
-            pbar.update(1)
-        pbar.close()
-
-    writer.release()
+        writer.release()
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        raise
 
     df = pd.json_normalize(steps_data['steps'])
     del steps_data
@@ -421,16 +439,18 @@ def main():
     print("Duration: {:.2f} seconds".format(df['timestamp'].max()))
     print("Average FPS: {:.1f}".format(fps))
     print("Action Space: {} actions".format(len(action_names)))
-    print("Video file: {}".format(output_file))
-
+    
     df['action_agree'] = np.where(df['car_action.action'] == df['tf_action.action'], 1, 0)
-    df['action_diff'] = np.abs(df['car_action.action'] - df['tf_action.action'])
+    print("Car inference vs. Tensorflow: {} of {} in agreement".format(df['action_agree'].sum(), len(df.index)))
     
     if args.describe:
+        df['action_diff'] = np.abs(df['car_action.action'] - df['tf_action.action'])
         action_analysis = df[['timestamp', 'seq', 'car_action.action', 'tf_action.action', 
                             'car_action.probability', 'tf_action.probability', 'action_agree', 'action_diff']]
         print(action_analysis.describe())
 
+    print("")
+    print("Created video file: {}".format(output_file))
 
 if __name__ == "__main__":
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
