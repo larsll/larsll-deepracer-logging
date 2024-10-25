@@ -1,21 +1,21 @@
 import argparse
 import datetime
-import json
 import os
-from functools import partial
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool
 from typing import List, Dict, Tuple
 
 import cv2
 
 import matplotlib
+from matplotlib import gridspec, pyplot as plt
+from matplotlib import font_manager as fm, rcParams
+
 import numpy as np
+import psutil
 import pandas as pd
 import rosbag2_py
 
 from cv_bridge import CvBridge
-from matplotlib.figure import Figure
-from matplotlib import gridspec, pyplot as plt
 from rclpy.serialization import deserialize_message
 from tqdm import tqdm
 
@@ -23,6 +23,8 @@ from deepracer_viz.model.model import Model
 from deepracer_viz.model.metadata import ModelMetadata
 from deepracer_viz.gradcam.cam import GradCam
 from deepracer_interfaces_pkg.msg import InferResultsArray
+
+from utils import get_gradient_values, apply_gradient, load_background_image
 
 matplotlib.use("Agg")
 
@@ -52,7 +54,7 @@ def get_rosbag_options(path: str, serialization_format: str = 'cdr') -> Tuple[ro
     return storage_options, converter_options
 
 
-def create_plot(action_names: List[str], height: float, width: float, dpi: int, title: str) -> matplotlib.figure.Figure:
+def create_plot(action_names: List[str], height: float, width: float, dpi: int, title: List[str], transparent: bool=False) -> matplotlib.figure.Figure:
     """
     Create a plot with four subplots using matplotlib.
 
@@ -61,42 +63,62 @@ def create_plot(action_names: List[str], height: float, width: float, dpi: int, 
     - height (float): The height of the plot in inches.
     - width (float): The width of the plot in inches.
     - dpi (int): The resolution of the plot in dots per inch.
+    - title List(str): The titles of the plot.
+    - transparent (bool): Whether the plot should have a transparent background.
 
     Returns:
     - fig (Figure): The matplotlib Figure object containing the plot.
     """
 
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    prop_big = fm.FontProperties(fname=os.path.join(script_dir, "resources", "Amazon_Ember_Rg.ttf"), size=20)
+    prop_big_bd = fm.FontProperties(fname=os.path.join(script_dir, "resources", "Amazon_Ember_Bd.ttf"), size=25)
+    prop_small = fm.FontProperties(fname=os.path.join(script_dir, "resources", "Amazon_Ember_Rg.ttf"), size=15)
+
     fig = plt.figure(figsize=(width/dpi, height/dpi), dpi=dpi)
-    fig.set_facecolor('black')
-    fig.suptitle(title, color='white', fontsize=20)
+    
+    if transparent:
+        fig.patch.set_alpha(0.0)
+    else:
+        fig.set_facecolor('black')
+
+    #fig.suptitle(title, color='#a166ff', x=0.5, y=0.97, fontproperties=prop_big)
+    
+    # Add left-aligned suptitle
+    fig.text(0.025, 0.95, title[0], color='#a166ff', fontproperties=prop_big_bd, ha='left')
+    
+    # Add right-aligned suptitle
+    fig.text(0.975, 0.95, title[1], color='lightgray', fontproperties=prop_big, ha='right')
     
     x = list(range(0, len(action_names)))
 
     spec = gridspec.GridSpec(ncols=4, nrows=2,
                              width_ratios=[1, 1, 1, 1], wspace=0.1,
-                             hspace=0.1, height_ratios=[3.5, 1], left=0.05, right=0.95, top=0.95, bottom=0.15)
+                             hspace=0.1, height_ratios=[3.5, 1.2], left=0.025, right=0.975, top=0.925, bottom=0.05)
     ax0 = fig.add_subplot(spec[0, :-2])
     ax0.set_xticks([])
     ax0.set_yticks([])
     for spine in ax0.spines.values():
-        spine.set_edgecolor('white')      
-        spine.set_linewidth(1.5)
+        spine.set_edgecolor('#a783e1')      
+        spine.set_linewidth(1)
     
     ax1 = fig.add_subplot(spec[0, -2:])
     ax1.set_xticks([])
     ax1.set_yticks([])
     for spine in ax1.spines.values():
-        spine.set_edgecolor('white')      
-        spine.set_linewidth(1.5)
+        spine.set_edgecolor('#a783e1')      
+        spine.set_linewidth(1)
 
     ax2 = fig.add_subplot(spec[1, :])
     ax2.set_ylim(0.0, 1.0)
     ax2.set_facecolor('black')
+    ax2.set_yticks([])
     for spine in ax2.spines.values():
-        spine.set_edgecolor('white')      
-        spine.set_linewidth(1.5)
+        spine.set_edgecolor('#a783e1')      
+        spine.set_linewidth(1)
 
-    plt.xticks(x, action_names[::-1], rotation='vertical', color='white', fontsize=15)
+    for i, label in enumerate(action_names[::-1]):
+        ax2.text(i, 0.5, label, ha='center', va='center', rotation=90, color='lightgray', fontproperties=prop_small)
 
     fig.canvas.draw()
 
@@ -104,7 +126,7 @@ def create_plot(action_names: List[str], height: float, width: float, dpi: int, 
 
 def create_img(
         step: Dict, bag_info: Dict, img: np.ndarray, grad_img: np.ndarray, action_names: List[str],
-        height: int, width: int) -> np.ndarray:
+        height: int, width: int, background: np.ndarray=None) -> np.ndarray:
     """
     Create an image with multiple plots and return it as a cv2 MatLike object.
 
@@ -116,13 +138,23 @@ def create_img(
         action_names (List[str]): A list of action names.
         height (int): The height of the resulting image.
         width (int): The width of the resulting image.
+        background (np.ndarray): The background image to use for the plot.
 
     Returns:
         np.ndarray: The resulting image as a cv2 MatLike object.
     """
 
     timestamp_formatted = "{:02}:{:05.2f}".format(int(step['timestamp'] // 60), step['timestamp'] % 60)
-    fig = create_plot(action_names, height, width, 72, title="{} - {} / {}".format(bag_info['name'], timestamp_formatted, step['seq_0']))
+    transparent = background is not None
+
+    # Split bag_info['name'] into parts
+    name_parts = bag_info['name'].split('-')
+    # Create one string with the last two parts
+    start_time = '-'.join(name_parts[-2:])
+    # Create another string with the rest
+    model_name = '-'.join(name_parts[:-2])
+
+    fig = create_plot(action_names, height, width, 72, title=[model_name, "{} {} / {}".format(start_time, timestamp_formatted, step['seq_0'])], transparent=transparent)
 
     x = list(range(0, len(action_names)))
 
@@ -138,19 +170,27 @@ def create_img(
 
     ax[0].imshow(img)
     ax[1].imshow(grad_img)
+    
     # Highlight the highest bar in a different color
-    bar_colors = ['#95d0fc'] * len(car_result['probability'])
+    bar_colors = ['#a783e1'] * len(car_result['probability'])
     max_index = car_result['probability'].idxmax()
-    bar_colors[max_index] = '#1f77b4'  # Darker tone similar to '#95d0fc'
+    bar_colors[max_index] = '#ff9900'
 
     ax[2].bar(x, car_result['probability'][::-1], color=bar_colors[::-1])
 
     fig.canvas.draw()
 
     buf = fig.canvas.buffer_rgba()
+
     ncols, nrows = fig.canvas.get_width_height()
     plt.close(fig)
-    img = cv2.cvtColor(np.frombuffer(buf, dtype=np.uint8).reshape(nrows, ncols, 4), cv2.COLOR_RGBA2BGR)
+    img = np.frombuffer(buf, dtype=np.uint8).reshape(nrows, ncols, 4)
+    
+    if background is not None:
+        gradient_alpha_rgb_mul, one_minus_gradient_alpha = get_gradient_values(img)
+        img = cv2.cvtColor(apply_gradient(background, gradient_alpha_rgb_mul, one_minus_gradient_alpha), cv2.COLOR_RGBA2BGR)
+    else:
+        img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
     encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 90]  # Adjust the quality as needed
     _, encimg = cv2.imencode('.jpg', img, encode_param)
     return encimg
@@ -340,6 +380,8 @@ def main():
     parser.add_argument("--model_path", help="The path to the model directory", required=True)
     parser.add_argument("--frame_limit", help="Max number of frames to process", default=None)
     parser.add_argument("--describe", help="Describe the actions", default=False)
+    parser.add_argument("--relative_labels", help="Make labels relative, not fixed to value in action space", default=False, type=bool)
+    parser.add_argument("--background", help="Add a background to the video", default=True, type=bool)
 
     args = parser.parse_args()
 
@@ -374,13 +416,31 @@ def main():
         frame_limit = float("inf")
 
     action_names = []
-    with open(metadata_json, "r") as jsonin:
-        model_metadata = json.load(jsonin)
-    for action in model_metadata['action_space']:
-        action_names.append(str(action['steering_angle']) + u'\N{DEGREE SIGN}' + " "+"%.1f" % action["speed"])
+    action_space = metadata.action_space.action_space
+    max_steering_angle = max(float(action['steering_angle']) for action in action_space)
+    max_speed = max(float(action['speed']) for action in action_space)
+
+    for action in action_space:
+        if args.relative_labels:
+            if float(action['steering_angle']) == 0.0:
+                steering_label = "C"
+            else:
+                steering_label = "L" if float(action['steering_angle']) > 0 else "R"
+            steering_value = abs(float(action['steering_angle']) * 100 / max_steering_angle)
+            speed_value = float(action["speed"]) * 100 / max_speed
+            action_names.append(f"{steering_label}{steering_value:.0f}% x {speed_value:.0f}%")
+        else:
+            action_names.append(str(action['steering_angle']) + u'\N{DEGREE SIGN}' + " "+"%.1f" % action["speed"])
     bag_info = analyze_bag(bag_path)
     print("")
     print("Analysed file. Starting processing...")
+
+    if args.background:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        background_path = os.path.join(script_dir, "resources", "AWS-Deepracer_Background_Machine-Learning.928f7bc20a014c7c7823e819ce4c2a84af17597c.jpg")
+        background = load_background_image(background_path, WIDTH, HEIGHT)
+    else:
+        background = None
 
     CODEC = args.codec
     output_file = "{}.mp4".format(bag_path)
@@ -392,7 +452,7 @@ def main():
     async_results = []
 
     try:
-        with Pool(min(cpu_count()-2, 10)) as pool:
+        with Pool(psutil.cpu_count(logical=False)-1) as pool:
             with model.session as sess:
                 cam = GradCam(model, model.get_conv_outputs())
                 reader = get_reader(bag_path)
@@ -402,7 +462,7 @@ def main():
                     try:
                         (_, data, _) = reader.read_next()
                         step, img, grad_img = process_data(data, start_time=bag_info['start_time'], seq=s, cam=cam)
-                        async_results.append(pool.apply_async(create_img, (step, bag_info, img, grad_img, action_names, HEIGHT, WIDTH)))
+                        async_results.append(pool.apply_async(create_img, (step, bag_info, img, grad_img, action_names, HEIGHT, WIDTH, background)))
                         steps_data['steps'].append(step)
                         s += 1
                         pbar.update(1)
