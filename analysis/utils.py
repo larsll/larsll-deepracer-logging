@@ -1,4 +1,8 @@
+from typing import List, Tuple
+
 import cv2
+import datetime
+import rosbag2_py
 
 def get_gradient_values(gradient_img, multiplier=1):
     """ Given the image gradient returns gradient_alpha_rgb_mul and one_minus_gradient_alpha.
@@ -75,3 +79,71 @@ def load_background_image(file: str, WIDTH, HEIGHT):
         resized_background = resized_background[:, :WIDTH]
 
     return cv2.cvtColor(resized_background, cv2.COLOR_BGR2RGBA)
+
+def get_rosbag_options(path: str, serialization_format: str = 'cdr') -> Tuple[rosbag2_py.StorageOptions, rosbag2_py.ConverterOptions]:
+    """
+    Get the ROS bag options for a given path and serialization format.
+
+    Args:
+        path (str): The path to the ROS bag file.
+        serialization_format (str, optional): The serialization format to use. Defaults to 'cdr'.
+
+    Returns:
+        Tuple[rosbag2_py.StorageOptions, rosbag2_py.ConverterOptions]: A tuple containing the storage options and converter options.
+    """
+
+    storage_options = rosbag2_py.StorageOptions(uri=path, storage_id='sqlite3')
+
+    converter_options = rosbag2_py.ConverterOptions(
+        input_serialization_format=serialization_format,
+        output_serialization_format=serialization_format)
+
+    return storage_options, converter_options
+
+def get_reader(bag_path: str, topics: List[str]) -> rosbag2_py.SequentialReader:
+    """
+    Returns a SequentialReader object for reading a ROS bag file.
+
+    Parameters:
+    - bag_path (str): The path to the ROS bag file.
+    - topics (List[str]): A list of topics to read from the bag file.
+
+    Returns:
+    - reader (rosbag2_py.SequentialReader): The SequentialReader object for reading the bag file.
+    """
+    storage_options, converter_options = get_rosbag_options(bag_path)
+    storage_filter = rosbag2_py.StorageFilter(topics=topics)
+
+    reader = rosbag2_py.SequentialReader()
+    reader.open(storage_options, converter_options)
+    reader.set_filter(storage_filter)
+
+    return reader
+
+def print_baginfo(bag_info: dict):
+    """
+    Prints detailed information about a bag file.
+
+    Args:
+        bag_info (dict): A dictionary containing the following keys:
+            - 'start_time' (float): The start time of the bag file in Unix timestamp.
+            - 'step_actual' (int): The actual number of steps loaded.
+            - 'step_diff' (int): The difference in steps.
+            - 'elapsed_time' (float): The elapsed time in seconds.
+            - 'fps' (float): The average frames per second.
+            - 'action_space_size' (int): The size of the action space.
+            - 'image_shape' (tuple): A tuple representing the shape of the input image (height, width, channels).
+            - 'total_frames' (int): The total number of messages/frames.
+    """
+
+    print("Start time: {}".format(datetime.datetime.fromtimestamp(bag_info['start_time'])))
+    print("Loaded {} steps from {}.".format(bag_info['step_actual'], bag_info['step_diff']))
+    print("Elapsed time: {:.2f} seconds".format(bag_info['elapsed_time']))
+    print("Average FPS: {:.1f}".format(bag_info['fps']))
+    print("Action Space: {} actions".format(bag_info['action_space_size']))
+    print("Input image: {}x{}, {} channels.".format(
+        bag_info['image_shape'][1],
+        bag_info['image_shape'][0],
+        bag_info['image_shape'][2]))
+    print("Total messages: {}, expected duration: {:.1f}".format(
+        bag_info['total_frames'], bag_info['total_frames']/bag_info['fps']))
