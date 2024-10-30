@@ -360,6 +360,10 @@ def main():
         print(f"Processing bag file: {bag_path}")
 
     metadata = ModelMetadata.from_file(metadata_json)
+
+    if metadata.action_space == 'continuous':
+        return NotImplementedError("Continuous action space not supported.")
+
     model = Model.from_file(model_pb_path=model_pb, metadata=metadata, log_device_placement=False)
 
     print("Using model: {}".format(model_path))
