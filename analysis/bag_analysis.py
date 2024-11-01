@@ -361,7 +361,7 @@ def main():
 
     metadata = ModelMetadata.from_file(metadata_json)
 
-    if metadata.action_space == 'continuous':
+    if metadata.action_space_type == 'continuous':
         return NotImplementedError("Continuous action space not supported.")
 
     model = Model.from_file(model_pb_path=model_pb, metadata=metadata, log_device_placement=False)
