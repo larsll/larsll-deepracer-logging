@@ -82,6 +82,7 @@ class BagLogNode(Node):
     _topics_type_info: List[Tuple[str, TopicEndpointInfo]] = []
     _topics_to_scan: List[str] = []
     _bag_lock = Lock()
+    _bag_writer = None
 
     _usb_path = False
 
@@ -324,14 +325,14 @@ class BagLogNode(Node):
                     self.get_logger().info("Got callback from {}. Triggering start.". format(self._monitor_topic))
 
             # Check that we are running and that bag is open.
-            if self._target_edit_state == RecordingState.Running and hasattr(self, '_bag_writer'):
+            if self._target_edit_state == RecordingState.Running and self._bag_writer is not None:
                 self._bag_lock.acquire()
                 self._bag_writer.write(topic, msg, time_recv.nanoseconds)
                 self._bag_lock.release()
 
         except Exception as e:  # noqa E722
             self.get_logger().error(traceback.format_stack())
-            self.get_logger().error("{} occurred in _receive_topic_callback.".format(sys.exc_info()[0]))
+            self.get_logger().error("Exception occurred in _receive_topic_callback: {}".format(e))
 
     def _timeout_check_timer_cb(self):
         try:
@@ -344,7 +345,7 @@ class BagLogNode(Node):
                 self.get_logger().info("Timeout. Triggering stop of recording.". format(self._monitor_topic))
 
         except:  # noqa E722
-            self.get_logger().error("{} occurred in _timeout_check_timer_cb.".format(sys.exc_info()[0]))
+            self.get_logger().error("{} occurred in _timeout_check_timer_cb.".format(sys.exc_info()[1]))
 
     def _change_cb(self):
         """Guard condition trigger callback.
@@ -358,11 +359,16 @@ class BagLogNode(Node):
                 else:
                     self._stop_bag()
             except:  # noqa E722
-                self.get_logger().error("{} occurred.".format(sys.exc_info()[0]))
+                self.get_logger().error("{} occurred in _change_cb.".format(sys.exc_info()[1]))
 
     def _start_bag(self):
 
         self._bag_lock.acquire()
+
+        if self._bag_writer is not None:
+            self._logger.warning("Bag already open. Will not open again.")
+            self._bag_lock.release()
+            return
 
         serialization_format = 'cdr'
 
