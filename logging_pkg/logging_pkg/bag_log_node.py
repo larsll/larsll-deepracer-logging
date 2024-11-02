@@ -21,12 +21,11 @@ from rcl_interfaces.msg import ParameterDescriptor, ParameterType
 
 from std_msgs.msg import String
 
-from deepracer_interfaces_pkg.srv import (USBFileSystemSubscribeSrv,
-                                          USBMountPointManagerSrv)
+from deepracer_interfaces_pkg.srv import USBFileSystemSubscribeSrv, USBMountPointManagerSrv
 from deepracer_interfaces_pkg.msg import USBFileSystemNotificationMsg
 
 import logging_pkg.constants as constants
-from logging_pkg.constants import (RecordingState, NodeState, LoggingMode)
+from logging_pkg.constants import RecordingState, NodeState, LoggingMode
 
 
 class BagLogNode(Node):
@@ -363,7 +362,7 @@ class BagLogNode(Node):
         except:  # noqa E722
             self.get_logger().error(traceback.format_stack())
 
-    def _create_subscription(self, topic_name, topic_endpoint: TopicEndpointInfo):
+    def _create_subscription(self, topic_name: str, topic_endpoint: TopicEndpointInfo):
         """
         Creates a subscription to a specified topic.
 
@@ -396,7 +395,7 @@ class BagLogNode(Node):
             callback_group=self._main_cbg, raw=True))
         self._topics_type_info.append((topic_name, topic_endpoint))
 
-    def _receive_topic_callback(self, msg, topic):
+    def _receive_topic_callback(self, msg, topic: str):
         """
         Callback function to handle incoming messages on subscribed topics.
 
@@ -534,15 +533,20 @@ class BagLogNode(Node):
 
         self._bag_writer = None
 
-    def create_topic(self, writer, topic_name, topic_type_info: TopicEndpointInfo, serialization_format='cdr'):
+    def create_topic(self, writer, topic_name:str, topic_type_info: TopicEndpointInfo, serialization_format:str='cdr'):
         """
-        Create a new topic.
-        :param writer: writer instance
-        :param topic_name:
-        :param topic_type:
-        :param serialization_format:
-        :return:
+        Creates a new topic in the ROS2 bag file.
+
+        Args:
+            writer: The writer object used to create the topic.
+            topic_name (str): The name of the topic to be created.
+            topic_type_info (TopicEndpointInfo): Information about the topic type.
+            serialization_format (str, optional): The serialization format to be used. Defaults to 'cdr'.
+
+        Returns:
+            None
         """
+
         topic_name = topic_name
         topic = rosbag2_py.TopicMetadata(name=topic_name, type=topic_type_info.topic_type,
                                          serialization_format=serialization_format)
