@@ -5,7 +5,6 @@ import importlib
 import sys
 import time
 import os
-from enum import Enum, IntEnum
 from threading import Event, Lock
 from typing import List, Tuple
 import traceback
@@ -27,38 +26,12 @@ from deepracer_interfaces_pkg.srv import (USBFileSystemSubscribeSrv,
 from deepracer_interfaces_pkg.msg import USBFileSystemNotificationMsg
 
 import logging_pkg.constants as constants
-from logging_pkg.constants import (RecordingState)
-
-
-class NodeState(IntEnum):
-    """ Status of node
-    Extends:
-        Enum
-    """
-    Starting = 0
-    Scanning = 1
-    Running = 2
-    Error = 3
-
-
-class LoggingMode(Enum):
-    """ Status of node
-    Extends:
-        Enum
-    """
-    Never = 0
-    USBOnly = 1
-    Always = 2
-
-    @classmethod
-    def _missing_(cls, name_):
-        for member in cls:
-            if member.name.lower() == name_.lower():
-                return member
+from logging_pkg.constants import (RecordingState, NodeState, LoggingMode)
 
 
 class BagLogNode(Node):
-    """This node is used to log a topic to a rosbag2.
+    """
+    This node is used to log a topic to a rosbag2.
 
     The `BagLogNode` class is responsible for logging a specified topic to a rosbag2 file.
     It provides functionality to monitor changes in the topic, start and stop the recording,
@@ -306,8 +279,9 @@ class BagLogNode(Node):
             self.get_logger().error(traceback.format_stack())
 
     def _usb_file_system_notification_cb(self, notification_msg):
-        """Callback for messages triggered whenever usb_monitor_node identifies a file/folder
-           thats being tracked.
+        """
+        Callback for messages triggered whenever usb_monitor_node identifies a file/folder
+        thats being tracked.
 
         Args:
             notification_msg (USBFileSystemNotificationMsg): Message containing information about the

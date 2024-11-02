@@ -1,4 +1,4 @@
-from enum import IntEnum
+from enum import IntEnum, Enum
 
 #########################################################################################
 # USBFileSystem services.
@@ -24,3 +24,30 @@ class RecordingState(IntEnum):
     Stopped = 0
     Running = 1
     Stopping = 2
+
+
+class NodeState(IntEnum):
+    """ Status of node
+    Extends:
+        Enum
+    """
+    Starting = 0
+    Scanning = 1
+    Running = 2
+    Error = 3
+
+
+class LoggingMode(Enum):
+    """ Status of node
+    Extends:
+        Enum
+    """
+    Never = 0
+    USBOnly = 1
+    Always = 2
+
+    @classmethod
+    def _missing_(cls, name_):
+        for member in cls:
+            if member.name.lower() == name_.lower():
+                return member
