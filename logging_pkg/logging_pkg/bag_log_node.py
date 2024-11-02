@@ -87,6 +87,36 @@ class BagLogNode(Node):
     _usb_path = False
 
     def __init__(self):
+        """
+        Initializes the BagLogNode.
+
+        This constructor initializes the BagLogNode by declaring and retrieving several parameters
+        related to logging configuration, such as output path, USB monitor settings, logging mode,
+        monitor topic, file name topic, monitor topic timeout, and log topics. It also sets up
+        internal variables based on these parameters.
+
+        Parameters:
+        - output_path (str): The path where logs will be stored. Default is defined in constants.LOGS_DEFAULT_FOLDER.
+        - disable_usb_monitor (bool): Flag to disable USB monitoring. Default is False.
+        - logging_mode (str): The mode of logging. Default is "Always".
+        - monitor_topic (str): The topic to monitor for inference results. Default is '/inference_pkg/rl_results'.
+        - file_name_topic (str): The topic to monitor for file names. Default is '/inference_pkg/model_name'.
+        - monitor_topic_timeout (int): The timeout duration for the monitor topic in seconds. Default is 1.
+        - log_topics (list of str): The list of topics to log. Default is ['/ctrl_pkg/servo_msg'].
+
+        Sets:
+        - self._output_path (str): The resolved output path for logs.
+        - self._disable_usb_monitor (bool): The resolved flag for USB monitoring.
+        - self._logging_mode (LoggingMode): The resolved logging mode.
+        - self._monitor_topic (str): The resolved monitor topic.
+        - self._file_name_topic (str): The resolved file name topic.
+        - self._monitor_topic_timeout (int): The resolved monitor topic timeout.
+        - self._monitor_timeout_duration (Duration): The duration object for monitor topic timeout.
+        - self._monitor_last_received (Time): The timestamp of the last received monitor message.
+        - self._log_topics (list of str): The resolved list of topics to log.
+        - self._topics_to_scan (list of str): The list of topics to scan, excluding the monitor topic.
+        - self._bag_name (str): The default bag name defined in constants.
+        """
         super().__init__('bag_log_node')
 
         self.declare_parameter(
@@ -101,7 +131,7 @@ class BagLogNode(Node):
 
         self.declare_parameter(
             'logging_mode', "Always",
-            ParameterDescriptor(type=ParameterType.PARAMETER_STRING))      
+            ParameterDescriptor(type=ParameterType.PARAMETER_STRING))
         self._logging_mode = LoggingMode(self.get_parameter('logging_mode').value)
 
         self.declare_parameter(
@@ -133,6 +163,21 @@ class BagLogNode(Node):
         self._bag_name = constants.DEFAULT_BAG_NAME
 
     def __enter__(self):
+        """
+        Enter the runtime context related to this object.
+
+        This method sets up various subscriptions, clients, and timers required for the node's operation.
+        It subscribes to the monitor topic, starts scanning if the logging mode is set to 'Always', and 
+        sets up a guard condition to monitor changes. It also creates a subscription to the file name topic.
+
+        If USB monitoring is not disabled, it sets up clients and subscriptions related to USB file system 
+        monitoring and mount point management. It waits for these services to become available and subscribes 
+        to notifications for USB file system changes. Additionally, it adds the "models" folder to the USB 
+        file system watchlist.
+
+        Returns:
+            self: The instance of the class.
+        """
 
         # Subscription to monitor topic.
         self._main_cbg = ReentrantCallbackGroup()
@@ -141,7 +186,7 @@ class BagLogNode(Node):
         if self._logging_mode == LoggingMode.Always:
             self._state = NodeState.Scanning
             self._scan_timer = self.create_timer(1.0, callback=self._scan_for_topics_cb,
-                                                callback_group=self._main_cbg)
+                                                 callback_group=self._main_cbg)
 
         # Monitor changes
         self._change_gc = self.create_guard_condition(callback=self._change_cb,
@@ -192,8 +237,26 @@ class BagLogNode(Node):
         return self
 
     def __exit__(self, ExcType, ExcValue, Traceback):
-        """Called when the object is destroyed.
         """
+        Method to handle the cleanup and shutdown process when exiting the context.
+
+        Args:
+            ExcType (type): The exception type that caused the context to exit.
+            ExcValue (Exception): The exception instance that caused the context to exit.
+            Traceback (traceback): The traceback object associated with the exception.
+
+        The method performs the following actions:
+        - Logs the reason for stopping the node.
+        - Stops the bag recording if it is running.
+        - Sets the shutdown event.
+        - Destroys the change_gc object.
+        - Destroys the timeout check timer if it exists.
+        - Destroys all topic subscriptions.
+
+        In case of an exception during the cleanup process, logs the stack trace.
+        Finally, logs that the node cleanup is done and the context is exiting.
+        """
+
         self.get_logger().info('Stopping the node due to {}.'.format(ExcType.__name__))
 
         try:
@@ -215,6 +278,20 @@ class BagLogNode(Node):
             self.get_logger().info('Node cleanup done. Exiting.')
 
     def _file_name_cb(self, filename_msg: String):
+        """
+        Callback function to handle the reception of a new filename message.
+
+        This function is triggered when a new filename message is received. If the 
+        current recording state is 'Running', it stops the recording and triggers 
+        a garbage collection change. It then extracts the bag name from the 
+        received filename message and logs the new filename and bag name.
+
+        Args:
+            filename_msg (String): The message containing the new filename.
+
+        Raises:
+            Logs an error message if an exception occurs during the process.
+        """
         try:
             if self._target_edit_state == RecordingState.Running:
                 self._target_edit_state = RecordingState.Stopped
@@ -250,11 +327,31 @@ class BagLogNode(Node):
             self.get_logger().info("USB folder mounted, starting scanning for topics.")
             self._state = NodeState.Scanning
             self._scan_timer = self.create_timer(1.0, callback=self._scan_for_topics_cb,
-                                                callback_group=self._main_cbg)
-            
+                                                 callback_group=self._main_cbg)
+
     def _scan_for_topics_cb(self):
-        """Method that is called by self._scan_timer to check if the monitor topic
-        is available. If yes it will trigger the startup procedure.
+        """
+        Callback function to scan for topics and create subscriptions.
+
+        This function is responsible for scanning the specified topics and creating
+        subscriptions to them. It also sets up a timer to check for timeouts and logs
+        the status of the monitoring and logging processes.
+
+        The function performs the following steps:
+        1. If the node state is `Scanning`, it retrieves the publishers' information
+           for the monitoring topic and creates a subscription for it. It also sets up
+           a timer to check for timeouts and logs the monitoring status.
+        2. For each topic in the list of topics to scan, it retrieves the publishers'
+           information and creates a subscription for the topic. It then removes the
+           topic from the list and logs the logging status.
+        3. If the node state is `Running` and all topics have been scanned, it logs
+           the number of active subscriptions and destroys the scan timer.
+
+        Exceptions:
+            Logs an error message with the traceback if an exception occurs.
+
+        Raises:
+            None
         """
 
         try:
@@ -293,6 +390,23 @@ class BagLogNode(Node):
             self.get_logger().error(traceback.format_stack())
 
     def _create_subscription(self, topic_name, topic_endpoint: TopicEndpointInfo):
+        """
+        Creates a subscription to a specified topic.
+
+        This method dynamically imports the topic type module and class based on the 
+        provided topic endpoint information. It then creates a subscription to the 
+        topic with the specified QoS settings and appends the subscription to the 
+        list of topic subscriptions.
+
+        Args:
+            topic_name (str): The name of the topic to subscribe to.
+            topic_endpoint (TopicEndpointInfo): An object containing information 
+                                                about the topic endpoint, including 
+                                                the topic type and QoS profile.
+
+        Returns:
+            None
+        """
         module_name, class_name = topic_endpoint.topic_type.replace('/', '.').rsplit(".", 1)
         type_module = importlib.import_module(module_name)
         topic_class = getattr(type_module, class_name)
@@ -309,9 +423,20 @@ class BagLogNode(Node):
         self._topics_type_info.append((topic_name, topic_endpoint))
 
     def _receive_topic_callback(self, msg, topic):
-        """ All messages are received in this single callback.
-            As subscriptions are raw we cannot review the messages, they
-            are directly written to the bag!
+        """
+        Callback function to handle incoming messages on subscribed topics.
+
+        This function is called whenever a message is received on any of the subscribed topics.
+        It logs the reception of the message, updates the monitoring state, and writes the message
+        to the bag file if recording is active.
+
+        Args:
+            msg: The message received from the topic.
+            topic (str): The name of the topic on which the message was received.
+
+        Raises:
+            Exception: If an error occurs during the processing of the message, it logs the error
+                       and ensures that any acquired locks are released.
         """
         try:
             self.get_logger().debug("Got message on {}.". format(topic))
@@ -331,10 +456,22 @@ class BagLogNode(Node):
                 self._bag_lock.release()
 
         except Exception as e:  # noqa E722
+            if self._bag_lock.locked():
+                self._bag_lock.release()
             self.get_logger().error(traceback.format_stack())
             self.get_logger().error("Exception occurred in _receive_topic_callback: {}".format(e))
 
     def _timeout_check_timer_cb(self):
+        """
+        Callback function for the timeout check timer.
+
+        This function is called periodically to check if the duration since the last received message
+        exceeds the specified timeout duration. If the timeout duration is exceeded and the recording
+        state is currently running, it stops the recording and triggers guard condition.
+
+        Raises:
+            Exception: Logs an error message if an exception occurs during the execution of the callback.
+        """
         try:
             dur_since_last_message = self.get_clock().now() - self._monitor_last_received
 
@@ -348,7 +485,14 @@ class BagLogNode(Node):
             self.get_logger().error("{} occurred in _timeout_check_timer_cb.".format(sys.exc_info()[1]))
 
     def _change_cb(self):
-        """Guard condition trigger callback.
+        """
+        Callback function triggered by a guard condition.
+
+        This function is called when a specific guard condition is met. It checks if the shutdown event is not set,
+        logs the state change, and either starts or stops the bag recording based on the target edit state.
+
+        Raises:
+            Exception: Logs an error message if an exception occurs during the state change process.
         """
         if not self._shutdown.is_set():
             try:
@@ -362,38 +506,59 @@ class BagLogNode(Node):
                 self.get_logger().error("{} occurred in _change_cb.".format(sys.exc_info()[1]))
 
     def _start_bag(self):
+        """
+        Starts a new bag for logging data.
 
-        self._bag_lock.acquire()
+        This method initializes and opens a new ROS2 bag file for logging data. It ensures that
+        only one bag is open at a time by acquiring a lock. If a bag is already open, it logs
+        a warning and exits. Otherwise, it creates the necessary directories, sets up the 
+        serialization and storage options, and opens a new bag file. It also creates topics 
+        in the bag based on the provided topic type information.
 
-        if self._bag_writer is not None:
-            self._logger.warning("Bag already open. Will not open again.")
+        Raises:
+            Exception: If any error occurs during the process, it logs the error and releases 
+                       the lock if it is held.
+        """
+        try:
+            self._bag_lock.acquire()
+
+            if self._bag_writer is not None:
+                self._logger.warning("Bag already open. Will not open again.")
+                self._bag_lock.release()
+                return
+
+            serialization_format = 'cdr'
+
+            bag_path = os.path.join(self._output_path, constants.LOGS_BAG_FOLDER_NAME_PATTERN.format(
+                self._bag_name, time.strftime("%Y%m%d-%H%M%S")))
+            if not os.path.exists(self._output_path):
+                os.makedirs(self._output_path)
+
+            converter_options = rosbag2_py.ConverterOptions(
+                input_serialization_format=serialization_format,
+                output_serialization_format=serialization_format)
+
+            storage_options = rosbag2_py.StorageOptions(uri=bag_path, storage_id='sqlite3')
+
+            self._bag_writer = rosbag2_py.SequentialWriter()
+            self._bag_writer.open(storage_options, converter_options)
+
+            for topic_type_info in self._topics_type_info:
+                self.create_topic(self._bag_writer, topic_type_info[0], topic_type_info[1])
+
             self._bag_lock.release()
-            return
-
-        serialization_format = 'cdr'
-
-        bag_path = os.path.join(self._output_path, constants.LOGS_BAG_FOLDER_NAME_PATTERN.format(
-            self._bag_name, time.strftime("%Y%m%d-%H%M%S")))
-        if not os.path.exists(self._output_path):
-            os.makedirs(self._output_path)
-
-        converter_options = rosbag2_py.ConverterOptions(
-            input_serialization_format=serialization_format,
-            output_serialization_format=serialization_format)
-
-        storage_options = rosbag2_py.StorageOptions(uri=bag_path, storage_id='sqlite3')
-
-        self._bag_writer = rosbag2_py.SequentialWriter()
-        self._bag_writer.open(storage_options, converter_options)
-
-        for topic_type_info in self._topics_type_info:
-            self.create_topic(self._bag_writer, topic_type_info[0], topic_type_info[1])
-
-        self._bag_lock.release()
+        except:  # noqa E722
+            self.get_logger().error("{} occurred in _start_bag.".format(sys.exc_info()[1]))
+            if self._bag_lock.locked():
+                self._bag_lock.release()
 
     def _stop_bag(self):
+        """
+        Stops the bag logging process by setting the bag writer to None.
+        This effectively stops any further data from being written to the bag.
+        """
 
-        del self._bag_writer
+        self._bag_writer = None
 
     def create_topic(self, writer, topic_name, topic_type_info: TopicEndpointInfo, serialization_format='cdr'):
         """
@@ -412,6 +577,20 @@ class BagLogNode(Node):
 
 
 def main(args=None):
+    """
+    Entry point for the ROS2 node.
+
+    This function initializes the ROS2 Python client library, creates an instance of the BagLogNode,
+    and starts spinning the node using a MultiThreadedExecutor. It handles keyboard interrupts and
+    logs any exceptions that occur during the node's execution. Finally, it ensures that the ROS2
+    client library is properly shut down.
+
+    Args:
+        args (list, optional): Command-line arguments passed to the ROS2 node. Defaults to None.
+
+    Raises:
+        Exception: Logs any exception that occurs during the node's execution.
+    """
 
     try:
         rclpy.init(args=args)
@@ -419,8 +598,6 @@ def main(args=None):
             executor = MultiThreadedExecutor()
             rclpy.spin(bag_log_node, executor)
         # Destroy the node explicitly
-        # (optional - otherwise it will be done automatically
-        # when the garbage collector destroys the node object)
         bag_log_node.destroy_node()
     except KeyboardInterrupt:
         pass
