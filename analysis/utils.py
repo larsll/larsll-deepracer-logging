@@ -147,3 +147,45 @@ def print_baginfo(bag_info: dict):
         bag_info['image_shape'][2]))
     print("Total messages: {}, expected duration: {:.1f}".format(
         bag_info['total_frames'], bag_info['total_frames']/bag_info['fps']))
+    
+
+def scale_continuous_value(action, min_old, max_old, min_new, max_new):
+    """Helper method that return the scaled continuous action space values
+        from min_old, max_old to min_new, max_new.
+
+    Args:
+        action (float): The action value to be scaled
+        min_old (float): The minimum bound value before scaling
+        max_old (float): The maximum bound value before scaling
+        min_new (float): The minimum bound value after scaling
+        max_new (float): The maximum bound value after scaling
+
+    Returns:
+        (float): scaled action value
+    """
+    if max_old == min_old:
+        print("Unsupported minimum and maximum action space bounds for scaling values. \
+            min_old: {}; max_old: {}".format(min_old, max_old))
+    return ((max_new - min_new) / (max_old - min_old)) * (action - min_old) + min_new
+
+
+def get_max_scaled_value(action_value, action_key):
+    """Helper method that scales the action value based on the maximum value in the
+        action space.
+
+    Args:
+        action_value (float): steering angle or speed value
+        action_key (string): steering_angle or speed
+
+    Returns:
+        float: scaled action value between [0.0, 1.0]
+    """
+    try:
+        max_value = self.max_action_space_values[action_key]
+        if max_value <= 0.0:
+            print(f"Invalid {action_key} value {max_value}")
+            return 0.0
+        return float(action_value) / float(max_value)
+    except Exception as ex:
+        print(f"Unable to scale the action value {action_key}: {ex}")
+        return 0.0

@@ -38,6 +38,7 @@ COLOR_TEXT_PRIMARY = '#a166ff'
 COLOR_TEXT_SECONDARY = 'lightgray'
 COLOR_BACKGROUND = 'black'
 
+RL_RESULTS = ['/inference_pkg/rl_results']
 
 def create_plot(
         action_names: List[str],
@@ -181,24 +182,25 @@ def create_img(
         return encimg
 
 
-def process_data(data: bytes, start_time: float, seq: int, cam: GradCam) -> Tuple[Dict, np.ndarray, np.ndarray]:
+def process_data(data: bytes, meta_data: ModelMetadata, bag_info: Dict, seq: int, cam: GradCam) -> Tuple[Dict, np.ndarray, np.ndarray]:
     """
-    Process data from a bag file.
+    Processes the given data to extract and analyze image and inference results.
 
     Args:
-        data (bytes): The data to process.
-        start_time (float): The start time of the data.
-        start_seq (int): The number of the first frame of the data.
-        cam (GradCam): The GradCam object used for image processing.
+        data (bytes): Serialized message data containing inference results and images.
+        meta_data (ModelMetadata): Model metadata object containing information, including Action Space, about the model.
+        bag_info (Dict): Dictionary containing information about the bag file, including the start time.
+        seq (int): Sequence number for the current data processing step.
+        cam (GradCam): GradCam object used for processing images with TensorFlow.
 
     Returns:
-        Tuple[Dict, np.ndarray, np.ndarray]: A tuple containing the processed data, the original image,
-        and the processed image.
-
-    Raises:
-        Exception: If an error occurs during the processing.
-
+        Tuple[Dict, np.ndarray, np.ndarray]: A tuple containing:
+            - A dictionary with processed step information including timestamps, sequence numbers, 
+              car actions, and TensorFlow results.
+            - The original image extracted from the first camera.
+            - The gradient image processed by TensorFlow.
     """
+
     try:
         step = {}
 
@@ -206,7 +208,7 @@ def process_data(data: bytes, start_time: float, seq: int, cam: GradCam) -> Tupl
 
         # Timestamp
         timestamp: float = (msg.images[0].header.stamp.sec + msg.images[0].header.stamp.nanosec / 1e9)
-        timestamp = timestamp - start_time
+        timestamp = timestamp - bag_info['start_time']
 
         step['timestamp'] = timestamp
         step['seq'] = int(msg.images[0].header.frame_id)
@@ -217,22 +219,51 @@ def process_data(data: bytes, start_time: float, seq: int, cam: GradCam) -> Tupl
         cv_img = cv2.cvtColor(cv_img, cv2.COLOR_BGRA2RGB)
 
         # Find best OpenVINO Result
-        step['car_action'] = {'action': -1, 'probability': -1}
-        step['car_results'] = []
-        for r in msg.results:
-            step['car_results'].append({'action': r.class_label, 'probability': r.class_prob})
-            if r.class_prob > step['car_action']['probability']:
-                step['car_action'] = {'action': r.class_label, 'probability': r.class_prob}
+        if meta_data.action_space_type == 'discrete':
+            step['car_action'] = {'action': -1, 'probability': -1}
+            step['car_results'] = []
+            for r in msg.results:
+                step['car_results'].append({'action': r.class_label, 'probability': r.class_prob})
+                if r.class_prob > step['car_action']['probability']:
+                    step['car_action'] = {'action': r.class_label, 'probability': r.class_prob}
 
-        # Process image with Tensorflow
-        tf_result, grad_img = cam.process(cv_img)
+            # Process image with Tensorflow
+            tf_result, grad_img = cam.process(cv_img)
 
-        step['tf_action'] = {'action': -1, 'probability': -1}
-        step['tf_results'] = []
-        for i, r in enumerate(tf_result):
-            step['tf_results'].append({'action': i, 'probability': r})
-            if r > step['tf_action']['probability']:
-                step['tf_action'] = {'action': i, 'probability': r}
+            step['tf_action'] = {'action': -1, 'probability': -1}
+            step['tf_results'] = []
+            for i, r in enumerate(tf_result):
+                step['tf_results'].append({'action': i, 'probability': r})
+                if r > step['tf_action']['probability']:
+                    step['tf_action'] = {'action': i, 'probability': r}
+
+        elif meta_data.action_space_type == 'continuous':
+            step['car_action'] = {'steer': -1, 'throttle': -1}
+            step['car_action']['steer'] = utils.scale_continuous_value(msg.results[0].class_prob,
+                                                        -1.0,
+                                                        1.0,
+                                                        meta_data.action_space.min_steer,
+                                                        meta_data.action_space.max_steer)
+            step['car_action']['throttle']  = utils.scale_continuous_value(msg.results[1].class_prob,
+                                                        -1.0,
+                                                        1.0,
+                                                        meta_data.action_space.min_speed,
+                                                        meta_data.action_space.max_speed)
+
+            # Process image with Tensorflow
+            tf_result, grad_img = cam.process(cv_img)            
+
+            step['tf_action'] = {'steer': -1, 'throttle': -1}
+            step['tf_action']['steer'] = utils.scale_continuous_value(tf_result[0],
+                                                        -1.0,
+                                                        1.0,
+                                                        meta_data.action_space.min_steer,
+                                                        meta_data.action_space.max_steer)
+            step['tf_action']['throttle']  = utils.scale_continuous_value(tf_result[1],
+                                                        -1.0,
+                                                        1.0,
+                                                        meta_data.action_space.min_speed,
+                                                        meta_data.action_space.max_speed)
 
         # Results
         step['results'] = []
@@ -257,7 +288,7 @@ def analyze_bag(bag_path: str) -> Dict:
 
     bag_info = {}
 
-    reader = utils.get_reader(bag_path, topics=['/inference_pkg/rl_results'])
+    reader = utils.get_reader(bag_path, topics=RL_RESULTS)
 
     first_stamp: float = -1
     steps_data = {'steps': []}
@@ -361,8 +392,8 @@ def main():
 
     metadata = ModelMetadata.from_file(metadata_json)
 
-    if metadata.action_space_type == 'continuous':
-        return NotImplementedError("Continuous action space not supported.")
+    if metadata.action_space_type not in ['continuous','discrete']:
+        return NotImplementedError("Action space type {} not supported.".format(metadata.action_space_type))
 
     model = Model.from_file(model_pb_path=model_pb, metadata=metadata, log_device_placement=False)
 
@@ -375,21 +406,43 @@ def main():
         frame_limit = float("inf")
 
     action_names = []
-    action_space = metadata.action_space.action_space
-    max_steering_angle = max(float(action['steering_angle']) for action in action_space)
-    max_speed = max(float(action['speed']) for action in action_space)
 
-    for action in action_space:
-        if args.relative_labels:
-            if float(action['steering_angle']) == 0.0:
-                steering_label = "C"
+    if metadata.action_space_type == 'discrete':
+        action_space = metadata.action_space.action_space
+        max_steering_angle = max(float(action['steering_angle']) for action in action_space)
+        max_speed = max(float(action['speed']) for action in action_space)
+
+        for action in action_space:
+            if args.relative_labels:
+                if float(action['steering_angle']) == 0.0:
+                    steering_label = "C"
+                else:
+                    steering_label = "L" if float(action['steering_angle']) > 0 else "R"
+                steering_value = abs(float(action['steering_angle']) * 100 / max_steering_angle)
+                speed_value = float(action["speed"]) * 100 / max_speed
+                action_names.append(f"{steering_label}{steering_value:.0f}% x {speed_value:.0f}%")
             else:
-                steering_label = "L" if float(action['steering_angle']) > 0 else "R"
-            steering_value = abs(float(action['steering_angle']) * 100 / max_steering_angle)
-            speed_value = float(action["speed"]) * 100 / max_speed
-            action_names.append(f"{steering_label}{steering_value:.0f}% x {speed_value:.0f}%")
+                action_names.append(str(action['steering_angle']) + u'\N{DEGREE SIGN}' + " "+"%.1f" % action["speed"])
+                
+    elif metadata.action_space_type == 'continuous':
+        max_steering_angle = max(abs(metadata.action_space.max_steer), abs(metadata.action_space.min_steer))
+        max_speed = max(abs(metadata.action_space.max_speed), abs(metadata.action_space.min_speed))
+
+        steer_label = np.linspace(metadata.action_space.min_steer, metadata.action_space.max_steer, 7).tolist()
+        speed_label = np.linspace(metadata.action_space.min_speed, metadata.action_space.max_speed, 7).tolist()
+
+        if args.relative_labels:
+            steer_label = [f"{(s * 100 / max_steering_angle):.0f}" for s in steer_label]
+            speed_label = [f"{(abs(s) * 100 / max_speed):.0f}" for s in speed_label]
+
+            action_names = steer_label ## TODO
         else:
-            action_names.append(str(action['steering_angle']) + u'\N{DEGREE SIGN}' + " "+"%.1f" % action["speed"])
+            steer_label = [f"{s:.1f}" + u'\N{DEGREE SIGN}' for s in steer_label]
+            speed_label = [f"{s:.1f}" for s in speed_label]
+
+            action_names = steer_label ## TODO
+
+
     bag_info = analyze_bag(bag_path)
     utils.print_baginfo(bag_info)
 
@@ -418,15 +471,16 @@ def main():
         with Pool(psutil.cpu_count(logical=False)-1) as pool:
             with model.session as sess:
                 cam = GradCam(model, model.get_conv_outputs())
-                reader = utils.get_reader(bag_path)
+                reader = utils.get_reader(bag_path, topics=RL_RESULTS)
 
                 pbar = tqdm(total=min(bag_info['total_frames'], frame_limit), desc="Loading messages", unit="messages")
                 while reader.has_next() and s < frame_limit:
                     try:
                         (_, data, _) = reader.read_next()
-                        step, img, grad_img = process_data(data, start_time=bag_info['start_time'], seq=s, cam=cam)
-                        async_results.append(pool.apply_async(create_img, (step, bag_info, img,
-                                             grad_img, action_names, HEIGHT, WIDTH, background)))
+                        step, img, grad_img = process_data(data, meta_data=metadata, bag_info=bag_info, seq=s, cam=cam)
+                        print(step['tf_action'])
+                        #async_results.append(pool.apply_async(create_img, (step, bag_info, img,
+                        #                     grad_img, action_names, HEIGHT, WIDTH, background)))
                         steps_data['steps'].append(step)
                         s += 1
                         pbar.update(1)
