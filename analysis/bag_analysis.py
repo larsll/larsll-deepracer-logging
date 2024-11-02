@@ -418,7 +418,7 @@ def main():
         with Pool(psutil.cpu_count(logical=False)-1) as pool:
             with model.session as sess:
                 cam = GradCam(model, model.get_conv_outputs())
-                reader = utils.get_reader(bag_path)
+                reader = utils.get_reader(bag_path, topics=['/inference_pkg/rl_results'])
 
                 pbar = tqdm(total=min(bag_info['total_frames'], frame_limit), desc="Loading messages", unit="messages")
                 while reader.has_next() and s < frame_limit:
