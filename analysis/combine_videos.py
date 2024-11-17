@@ -114,11 +114,6 @@ def combine_videos(video_files: list, output_file: str, background_path: str, fo
         prefix = '-'.join(parts[:-2])
         date_time = '-'.join(parts[-2:]).replace('.mp4', '')
 
-        # Create and write divider frame
-        divider_frame = create_divider_frame(width, height, prefix, date_time, background_path, font_path_bd, font_path_rg)
-        for _ in range(int(fps * 1.5)):  # Display the divider for 1.5 second
-            out.write(divider_frame)
-
         cap = cv2.VideoCapture(video_file)
         duration = cap.get(cv2.CAP_PROP_FRAME_COUNT) / fps
         if duration < 20:
@@ -127,6 +122,11 @@ def combine_videos(video_files: list, output_file: str, background_path: str, fo
             continue
         else:
             print(f"Adding video: {video_file}")
+
+        # Create and write divider frame
+        divider_frame = create_divider_frame(width, height, prefix, date_time, background_path, font_path_bd, font_path_rg)
+        for _ in range(int(fps * 1.5)):  # Display the divider for 1.5 second
+            out.write(divider_frame)
 
         while cap.isOpened():
             ret, frame = cap.read()
