@@ -98,10 +98,15 @@ def create_plot(
     ax2 = fig.add_subplot(spec[1, :])
     ax2.set_ylim(0.0, 1.0)
     ax2.set_facecolor(COLOR_BACKGROUND)
+    ax2.set_xticks([])
     ax2.set_yticks([])
     for spine in ax2.spines.values():
         spine.set_edgecolor(COLOR_EDGE)
+        spine.set_linewidth(1)
 
+    for i, label in enumerate(action_names[::-1]):
+        ax2.text(i, 0.5, label, ha='center', va='center', rotation=90, color=COLOR_TEXT_SECONDARY, fontproperties=prop_small)
+    
     return fig
 
 
@@ -176,8 +181,9 @@ def create_img(
                                               one_minus_gradient_alpha), cv2.COLOR_RGBA2BGR)
         else:
             img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
-            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 90]  # Adjust the quality as needed
-            _, encimg = cv2.imencode('.jpg', img, encode_param)
+
+        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 90]  # Adjust the quality as needed
+        _, encimg = cv2.imencode('.jpg', img, encode_param)
         return encimg
 
 
