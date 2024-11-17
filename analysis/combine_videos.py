@@ -3,20 +3,22 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import argparse
+import fnmatch
 
-def get_video_files(directory: str) -> dict:
+def get_video_files(directory: str, pattern: str) -> dict:
     """
-    Get a dictionary of video files grouped by prefix and date.
+    Get a dictionary of video files grouped by prefix and date, filtered by a pattern.
 
     Args:
         directory (str): The directory containing the video files.
+        pattern (str): The pattern to filter video files.
 
     Returns:
         dict: A dictionary where keys are tuples of (prefix, date) and values are lists of video file paths.
     """
     video_files = {}
     for file in os.listdir(directory):
-        if file.endswith(".mp4"):
+        if file.endswith(".mp4") and fnmatch.fnmatch(file, pattern):
             parts = file.split('-')
             prefix = '-'.join(parts[:-2])
             date = parts[-2]
@@ -141,6 +143,7 @@ def main():
     parser.add_argument("--directory", help="The directory containing the video files", required=True)
     parser.add_argument("--output_dir", help="The directory to save the combined videos", required=True)
     parser.add_argument("--background", help="The path to the background image for dividers", default=None)
+    parser.add_argument("--pattern", help="Pattern to filter video files", default="*.mp4")
     args = parser.parse_args()
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -151,7 +154,7 @@ def main():
     font_path_bd = os.path.join(script_dir, "resources", "Amazon_Ember_Bd.ttf")
     font_path_rg = os.path.join(script_dir, "resources", "Amazon_Ember_Rg.ttf")
 
-    video_files_dict = get_video_files(args.directory)
+    video_files_dict = get_video_files(args.directory, args.pattern)
     for (prefix, date), video_files in video_files_dict.items():
         output_file = os.path.join(args.output_dir, f"{prefix}-{date}.mp4")
         combine_videos(video_files, output_file, args.background, font_path_bd, font_path_rg)
