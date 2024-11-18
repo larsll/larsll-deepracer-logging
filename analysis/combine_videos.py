@@ -57,7 +57,7 @@ def create_divider_frame(width: int, height: int, prefix: str, date_time: str, b
 
     # Load custom fonts
     font_bd = ImageFont.truetype(font_path_bd, 60)
-    font_rg = ImageFont.truetype(font_path_rg, 60)
+    font_rg = ImageFont.truetype(font_path_rg, 45)
 
     # Calculate text positions using textbbox
     text_bbox_prefix = draw.textbbox((0, 0), prefix, font=font_bd)
@@ -80,7 +80,7 @@ def create_divider_frame(width: int, height: int, prefix: str, date_time: str, b
 
     return background
 
-def combine_videos(video_files: list, output_file: str, background_path: str, font_path_bd: str, font_path_rg: str):
+def combine_videos(video_files: list, output_file: str, background_path: str, font_path_bd: str, font_path_rg: str, codec: str = "avc1") -> None:
     """
     Combine multiple video files into a single video file.
 
@@ -90,6 +90,7 @@ def combine_videos(video_files: list, output_file: str, background_path: str, fo
         background_path (str): The path to the background image for dividers.
         font_path_bd (str): The path to the bold font.
         font_path_rg (str): The path to the regular font.
+        codec (str): The codec for the video writer.
     """
     if not video_files:
         print("No video files to combine.")
@@ -105,7 +106,7 @@ def combine_videos(video_files: list, output_file: str, background_path: str, fo
     cap.release()
 
     # Create a video writer
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    fourcc = cv2.VideoWriter_fourcc(*codec)
     out = cv2.VideoWriter(output_file, fourcc, fps, (width, height))
 
     for video_file in video_files:
@@ -140,6 +141,7 @@ def combine_videos(video_files: list, output_file: str, background_path: str, fo
 
 def main():
     parser = argparse.ArgumentParser(description="Combine videos with the same prefix created on the same day.")
+    parser.add_argument("--codec", help="The codec for the video writer", default="avc1")
     parser.add_argument("--directory", help="The directory containing the video files", required=True)
     parser.add_argument("--output_dir", help="The directory to save the combined videos", required=True)
     parser.add_argument("--background", help="The path to the background image for dividers", default=None)
@@ -157,7 +159,7 @@ def main():
     video_files_dict = get_video_files(args.directory, args.pattern)
     for (prefix, date), video_files in video_files_dict.items():
         output_file = os.path.join(args.output_dir, f"{prefix}-{date}.mp4")
-        combine_videos(video_files, output_file, args.background, font_path_bd, font_path_rg)
+        combine_videos(video_files, output_file, args.background, font_path_bd, font_path_rg, codec=args.codec)
 
 if __name__ == "__main__":
     main()
