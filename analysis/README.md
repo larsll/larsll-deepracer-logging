@@ -57,6 +57,44 @@ python3 combine_videos.py --directory <directory> --output_dir <output_dir> [opt
 - `--background`: The path to the background image for dividers (default: `resources/AWS-Deepracer_Background_Machine-Learning.jpg`).
 - `--pattern`: Pattern to filter video files (default: `*.mp4`).
 
+## Running with Docker
+
+To simplify the setup and ensure all dependencies are met, you can use Docker to build and run the scripts in an environment where ROS and TensorFlow are installed.
+
+### Building the Docker Image
+
+First, build the Docker image using the provided `Dockerfile`.
+
+```shell
+docker buildx build -t local/deepracer-analysis:ros-tf -f Dockerfile .
+```
+
+### Running the Docker Container
+
+Once the image is built, you can run the container and execute the scripts inside it.
+
+```shell
+docker run -ti -p 8888:8888 -v `pwd`:/workspace/analysis -v /path/to/logs:/workspace/logs -v /path/to/models:/workspace/models local/deepracer-analysis:ros-tf <script> <parameters>
+```
+
+Replace `<script>` with the script you want to run (e.g., `bag_analysis_batch.sh`, `bag_analysis.py`, `combine_videos.py`) and `<parameters>` with the appropriate parameters for the script.
+
+### Example
+
+To analyze ROS bag files and combine the resulting videos using Docker:
+
+1. Run `bag_analysis_batch.sh` inside the Docker container:
+    ```shell
+    docker run -ti -p 8888:8888 -v `pwd`:/workspace/analysis -v /path/to/bag/files:/workspace/logs -v /path/to/models:/workspace/models local/deepracer-analysis:ros-tf ./bag_analysis_batch.sh -d /workspace/logs -m /workspace/models
+    ```
+
+2. Run `combine_videos.py` inside the Docker container:
+    ```shell
+    docker run -ti -p 8888:8888 -v `pwd`:/workspace/analysis -v /path/to/videos:/workspace/logs -v /path/to/output:/workspace/models local/deepracer-analysis:ros-tf python3 combine_videos.py --directory /workspace/logs --output_dir /workspace/models
+    ```
+
+This will process the ROS bag files and combine the generated videos with metadata dividers in the specified output directory.
+
 ## Resources
 
 The scripts use custom fonts and background images located in the `resources` directory. Ensure these resources are available in the specified paths.
