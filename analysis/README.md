@@ -85,12 +85,12 @@ To analyze ROS bag files and combine the resulting videos using Docker:
 
 1. Run `bag_analysis_batch.sh` inside the Docker container:
     ```shell
-    docker run -ti -p 8888:8888 -v `pwd`:/workspace/analysis -v /path/to/bag/files:/workspace/logs -v /path/to/models:/workspace/models local/deepracer-analysis:ros-tf ./bag_analysis_batch.sh -d /workspace/logs -m /workspace/models
+    docker run -ti -p 8888:8888 -v `pwd`:/workspace/analysis -v /path/to/bag/files:/workspace/logs -v /path/to/models:/workspace/models local/deepracer-analysis:ros-tf bash -c 'source /workspace/install/setup.bash && /workspace/analysis/bag_analysis_batch.sh -d /workspace/logs -m /workspace/models'
     ```
 
 2. Run `combine_videos.py` inside the Docker container:
     ```shell
-    docker run -ti -p 8888:8888 -v `pwd`:/workspace/analysis -v /path/to/videos:/workspace/logs -v /path/to/output:/workspace/models local/deepracer-analysis:ros-tf python3 combine_videos.py --directory /workspace/logs --output_dir /workspace/models
+    docker run -ti -p 8888:8888 -v `pwd`:/workspace/analysis -v /path/to/videos:/workspace/logs -v /path/to/output:/workspace/models local/deepracer-analysis:ros-tf  bash -c 'source /workspace/install/setup.bash && python3 /workspace/analysis/combine_videos.py --directory /workspace/logs --output_dir /workspace/models'
     ```
 
 This will process the ROS bag files and combine the generated videos with metadata dividers in the specified output directory.
