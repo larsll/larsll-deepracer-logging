@@ -45,7 +45,7 @@ WORKDIR /
 RUN mkdir -p /workspace/analysis /workspace/src /workspace/logs /workspace/models
 
 RUN cd /workspace/src && \
-    git clone -b logging https://github.com/larsll/deepracer-viz && \
+    git clone -b v2 https://github.com/jochem725/deepracer-viz && \
     git clone -b compressed-image https://github.com/larsll/aws-deepracer-interfaces-pkg && \
     bash -c 'cd /workspace && source /opt/ros/humble/setup.bash && colcon build --merge-install && rm -rf build && rm -rf log ' 
 
