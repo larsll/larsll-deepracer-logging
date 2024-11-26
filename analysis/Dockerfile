@@ -41,15 +41,19 @@ RUN pip3 install -U --no-cache-dir 'tensorflow-cpu<2.10' \
                                python-dateutil \
                                tqdm
 
-WORKDIR /
-RUN mkdir -p /workspace/analysis /workspace/src /workspace/logs /workspace/models /tmp/matplotlib
-ENV MPLCONFIGDIR=/tmp/matplotlib
+RUN mkdir -p /workspace/analysis /workspace/src /workspace/logs /workspace/models /workspace/.tmp/matplotlib && chmod o+rw /workspace/.tmp/matplotlib
+ENV MPLCONFIGDIR=/workspace/.tmp/matplotlib
 
 RUN cd /workspace/src && \
     git clone -b v2 https://github.com/jochem725/deepracer-viz && \
     git clone -b compressed-image https://github.com/larsll/aws-deepracer-interfaces-pkg && \
     bash -c 'cd /workspace && source /opt/ros/humble/setup.bash && colcon build --merge-install && rm -rf build && rm -rf log ' 
 
+ADD . /workspace/analysis
+
 EXPOSE 8888
+WORKDIR /workspace/analysis
+ENV PATH="$PATH:/workspace/analysis"
 VOLUME ["/workspace/analysis", "/root/.aws", "/workspace/logs", "/workspace/models"]
-CMD bash -c 'source /workspace/install/setup.bash && cd /workspace && jupyter lab --ip=0.0.0.0 --port=8888 --allow-root --no-browser'
+ENTRYPOINT [ "/workspace/analysis/entrypoint.sh" ]
+CMD bash -c 'jupyter lab --ip=0.0.0.0 --port=8888 --allow-root --no-browser'

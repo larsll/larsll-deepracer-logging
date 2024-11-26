@@ -11,7 +11,7 @@ This script processes multiple ROS bag files in a specified directory using a Py
 #### Usage
 
 ```shell
-python bag_analysis_batch.py --input_dir <directory> --output_dir <output_dir> --models_dir <models_directory> [options]
+python3 bag_analysis_batch.py --input_dir <directory> --output_dir <output_dir> --models_dir <models_directory> [options]
 ```
 
 #### Parameters
@@ -73,7 +73,7 @@ To simplify the setup and ensure all dependencies are met, you can use Docker to
 First, build the Docker image using the provided `Dockerfile`.
 
 ```shell
-docker buildx build -t local/deepracer-analysis:ros-tf -f Dockerfile .
+docker buildx build -t local/deepracer-log-analysis -f Dockerfile .
 ```
 
 ### Running the Docker Container
@@ -81,7 +81,7 @@ docker buildx build -t local/deepracer-analysis:ros-tf -f Dockerfile .
 Once the image is built, you can run the container and execute the scripts inside it.
 
 ```shell
-docker run -ti -p 8888:8888 -v `pwd`:/workspace/analysis -v /path/to/logs:/workspace/logs -v /path/to/models:/workspace/models local/deepracer-analysis:ros-tf <script> <parameters>
+docker run -ti --rm --user $(id -u):$(id -g) -v /path/to/logs:/workspace/logs -v /path/to/models:/workspace/models local/deepracer-log-analysis <script> <parameters>
 ```
 
 Replace `<script>` with the script you want to run (e.g., `bag_analysis_batch.py`, `bag_analysis.py`, `combine_videos.py`) and `<parameters>` with the appropriate parameters for the script.
@@ -91,8 +91,9 @@ Replace `<script>` with the script you want to run (e.g., `bag_analysis_batch.py
 To analyze ROS bag files and combine the resulting videos using Docker:
 
 Run `bag_analysis_batch.py` inside the Docker container:
+
     ```shell
-    docker run -ti -p 8888:8888 -v `pwd`:/workspace/analysis -v /path/to/bag/files:/workspace/logs -v /path/to/models:/workspace/models local/deepracer-analysis:ros-tf bash -c 'source /workspace/install/setup.bash && python3 /workspace/analysis/bag_analysis_batch.py --input_dir /workspace/logs --output_dir /workspace/models --models_dir /workspace/models'
+    docker run -ti --rm --user $(id -u):$(id -g) -v /path/to/bag/files:/workspace/logs -v /path/to/models:/workspace/models local/deepracer-log-analysis bag_analysis_batch.py --input_dir /workspace/logs --output_dir /workspace/models --models_dir /workspace/models
     ```
 
 This will process the ROS bag files and combine the generated videos with metadata dividers in the specified output directory.
@@ -105,18 +106,3 @@ The scripts use custom fonts and background images located in the `resources` di
 - `Amazon_Ember_Rg.ttf`
 - `AWS-Deepracer_Background_Machine-Learning.jpg`
 
-## Example
-
-To process ROS bag files and combine the resulting videos:
-
-1. Run `bag_analysis_batch.py` to analyze the bag files:
-    ```shell
-    python3 bag_analysis_batch.py --input_dir /path/to/bag/files --output_dir /path/to/output --models_dir /path/to/models
-    ```
-
-2. Run `combine_videos.py` to combine the generated videos:
-    ```shell
-    python3 combine_videos.py --input_dir /path/to/videos --output_dir /path/to/output
-    ```
-
-This will generate combined videos with metadata dividers in the specified output directory.
