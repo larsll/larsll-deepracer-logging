@@ -5,6 +5,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
 import rclpy.logging
 from typing import List, Dict, Tuple
 import multiprocessing as mp
+import heapq
 import queue
 import datetime
 import argparse
@@ -23,7 +24,6 @@ from deepracer_viz.model.metadata import ModelMetadata
 from deepracer_viz.gradcam.cam import GradCam
 from deepracer_interfaces_pkg.msg import InferResultsArray
 import utils
-
 
 matplotlib.use("Agg")
 
@@ -500,33 +500,43 @@ def main():
                     desc="Writing image frames", unit="frames", smoothing=0.1)
 
         # Read results from the result queue, stop once we have received expected number of frames
-        results = []
+        # Priority queue to store results
+        pq = []
+        expected_index = 1
+        
         while True:
             try:
-                results.append(result_queue.get(timeout=0.1))
+                result = result_queue.get(timeout=0.1)
+                if len(pq) == 0 and expected_index == 1:
+                    pbar_proc.reset()
+                    pbar_write.reset()
+
+                heapq.heappush(pq, result)
                 pbar_proc.update(1)
 
+                # Process results in order
+                while pq and pq[0][0] == expected_index:
+                    _, step, encimg = heapq.heappop(pq)
+                    steps_data['steps'].append(step)
+                    writer.write(cv2.imdecode(np.frombuffer(encimg, dtype=np.uint8), cv2.IMREAD_COLOR))
+                    pbar_write.update(1)
+                    expected_index += 1
+
             except queue.Empty:
-                if len(results) == frame_limit:
+                if len(steps_data['steps']) == frame_limit:
                     break
                 else:
                     continue
+
+            except Exception as e:
+                print(f"Error writing frame: {e}")
+                raise
 
         # Wait for the stream reader to finish, then send termination
         # to the worker processes.
         stream_reader.join()
         for _ in worker_processes:
             data_queue.put(None)
-
-        for _, step, encimg in sorted(results, key=lambda x: x[0]):
-            try:
-                steps_data['steps'].append(step)
-                writer.write(cv2.imdecode(np.frombuffer(encimg, dtype=np.uint8), cv2.IMREAD_COLOR))
-                pbar_write.update(1)
-            except Exception as e:
-                print(f"Error writing frame: {e}")
-                raise
-
         
         pbar_proc.close()
         pbar_write.close()
