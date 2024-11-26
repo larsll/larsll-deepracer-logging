@@ -4,20 +4,27 @@ This repository contains scripts for analyzing and combining video files generat
 
 ## Scripts
 
-### 1. `bag_analysis_batch.sh`
+### 1. `bag_analysis_batch.py`
 
 This script processes multiple ROS bag files in a specified directory using a Python analysis script.
 
 #### Usage
 
 ```shell
-./bag_analysis_batch.sh -d <directory> -m <models_directory>
+python bag_analysis_batch.py --input_dir <directory> --output_dir <output_dir> --models_dir <models_directory> [options]
 ```
 
 #### Parameters
 
-- `-d <directory>`: The directory containing the ROS bag files.
-- `-m <models_directory>`: The directory containing the model files.
+- `--input_dir <directory>`: The directory containing the ROS bag files.
+- `--output_dir <output_dir>`: The directory to save the videos.
+- `--models_dir <models_directory>`: The directory containing the model files.
+- `--codec`: The codec for the video writer (default: `avc1`).
+- `--frame_limit`: Max number of frames to process (default: `None`).
+- `--describe`: Describe the actions (default: `False`).
+- `--relative_labels`: Make labels relative, not fixed to value in action space (default: `False`).
+- `--background`: Add a background to the video (default: `True`).
+- `--pattern`: Pattern to filter bag files (default: `*`).
 
 ### 2. `bag_analysis.py`
 
@@ -46,13 +53,13 @@ This script combines multiple video files into a single video file, adding divid
 #### Usage
 
 ```shell
-python3 combine_videos.py --directory <directory> --output_dir <output_dir> [options]
+python3 combine_videos.py --input_dir <directory> --output_dir <output_dir> [options]
 ```
 
 #### Parameters
 
 - `--codec`: The codec for the video writer (default: `avc1`).
-- `--directory`: The directory containing the video files (required).
+- `--input_dir`: The directory containing the video files (required).
 - `--output_dir`: The directory to save the combined videos (required).
 - `--background`: The path to the background image for dividers (default: `resources/AWS-Deepracer_Background_Machine-Learning.jpg`).
 - `--pattern`: Pattern to filter video files (default: `*.mp4`).
@@ -77,20 +84,15 @@ Once the image is built, you can run the container and execute the scripts insid
 docker run -ti -p 8888:8888 -v `pwd`:/workspace/analysis -v /path/to/logs:/workspace/logs -v /path/to/models:/workspace/models local/deepracer-analysis:ros-tf <script> <parameters>
 ```
 
-Replace `<script>` with the script you want to run (e.g., `bag_analysis_batch.sh`, `bag_analysis.py`, `combine_videos.py`) and `<parameters>` with the appropriate parameters for the script.
+Replace `<script>` with the script you want to run (e.g., `bag_analysis_batch.py`, `bag_analysis.py`, `combine_videos.py`) and `<parameters>` with the appropriate parameters for the script.
 
 ### Example
 
 To analyze ROS bag files and combine the resulting videos using Docker:
 
-1. Run `bag_analysis_batch.sh` inside the Docker container:
+Run `bag_analysis_batch.py` inside the Docker container:
     ```shell
-    docker run -ti -p 8888:8888 -v `pwd`:/workspace/analysis -v /path/to/bag/files:/workspace/logs -v /path/to/models:/workspace/models local/deepracer-analysis:ros-tf bash -c 'source /workspace/install/setup.bash && /workspace/analysis/bag_analysis_batch.sh -d /workspace/logs -m /workspace/models'
-    ```
-
-2. Run `combine_videos.py` inside the Docker container:
-    ```shell
-    docker run -ti -p 8888:8888 -v `pwd`:/workspace/analysis -v /path/to/videos:/workspace/logs -v /path/to/output:/workspace/models local/deepracer-analysis:ros-tf  bash -c 'source /workspace/install/setup.bash && python3 /workspace/analysis/combine_videos.py --directory /workspace/logs --output_dir /workspace/models'
+    docker run -ti -p 8888:8888 -v `pwd`:/workspace/analysis -v /path/to/bag/files:/workspace/logs -v /path/to/models:/workspace/models local/deepracer-analysis:ros-tf bash -c 'source /workspace/install/setup.bash && python3 /workspace/analysis/bag_analysis_batch.py --input_dir /workspace/logs --output_dir /workspace/models --models_dir /workspace/models'
     ```
 
 This will process the ROS bag files and combine the generated videos with metadata dividers in the specified output directory.
@@ -107,14 +109,14 @@ The scripts use custom fonts and background images located in the `resources` di
 
 To process ROS bag files and combine the resulting videos:
 
-1. Run `bag_analysis_batch.sh` to analyze the bag files:
+1. Run `bag_analysis_batch.py` to analyze the bag files:
     ```shell
-    ./bag_analysis_batch.sh -d /path/to/bag/files -m /path/to/models
+    python3 bag_analysis_batch.py --input_dir /path/to/bag/files --output_dir /path/to/output --models_dir /path/to/models
     ```
 
 2. Run `combine_videos.py` to combine the generated videos:
     ```shell
-    python3 combine_videos.py --directory /path/to/videos --output_dir /path/to/output
+    python3 combine_videos.py --input_dir /path/to/videos --output_dir /path/to/output
     ```
 
 This will generate combined videos with metadata dividers in the specified output directory.
