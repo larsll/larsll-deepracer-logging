@@ -20,7 +20,7 @@ def main():
     parser.add_argument("--codec", help="The codec for the video writer", default="avc1")
     parser.add_argument("--frame_limit", help="Max number of frames to process", default=None)
     parser.add_argument("--describe", help="Describe the actions", action="store_true")
-    parser.add_argument("--relative_labels", help="Make labels relative, not fixed to value in action space", action="store_true")
+    parser.add_argument("--relative_labels", help="Make labels relative, not fixed to value in action space", default=False, action="store_true")
     parser.add_argument("--background", dest="background", help="Add a background to the video", action="store_true")
     parser.add_argument("--no-background", dest="background", help="Do not add a background to the video", action="store_false")
     parser.set_defaults(background=True)
@@ -57,9 +57,10 @@ def main():
                 'python3', os.path.join(script_dir, 'bag_analysis.py'),
                 '--bag_path', bag_path,
                 '--model_path', model_path,
-                '--codec', args.codec,
-                '--relative_labels', str(args.relative_labels)
+                '--codec', args.codec
             ]
+            if args.relative_labels:
+                cmd.extend(['--relative_labels'])
             if args.background:
                 cmd.extend(['--background'])
             if args.frame_limit:

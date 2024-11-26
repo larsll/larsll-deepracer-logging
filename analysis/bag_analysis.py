@@ -396,8 +396,8 @@ def main():
     parser.add_argument("--frame_limit", help="Max number of frames to process", default=None)
     parser.add_argument("--describe", help="Describe the actions", default=False)
     parser.add_argument("--relative_labels",
-                        help="Make labels relative, not fixed to value in action space", default=False, type=bool)
-    parser.add_argument("--background", help="Add a background to the video", default=False, type=bool)
+                        help="Make labels relative, not fixed to value in action space", default=False, action="store_true")
+    parser.add_argument("--background", help="Add a background to the video", default=False, action="store_true")
 
     args = parser.parse_args()
 
