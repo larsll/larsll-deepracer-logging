@@ -27,7 +27,7 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
 	apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install tensorflow and visualization
-RUN pip3 install -U --no-cache-dir tensorflow-cpu \
+RUN pip3 install -U --no-cache-dir 'tensorflow-cpu<2.10' \
                                python-resize-image \
                                'deepracer-utils>=1.0.3' \
                                'jupyterlab>=2.0.0' \ 
@@ -42,7 +42,8 @@ RUN pip3 install -U --no-cache-dir tensorflow-cpu \
                                tqdm
 
 WORKDIR /
-RUN mkdir -p /workspace/analysis /workspace/src /workspace/logs /workspace/models
+RUN mkdir -p /workspace/analysis /workspace/src /workspace/logs /workspace/models /tmp/matplotlib
+ENV MPLCONFIGDIR=/tmp/matplotlib
 
 RUN cd /workspace/src && \
     git clone -b v2 https://github.com/jochem725/deepracer-viz && \

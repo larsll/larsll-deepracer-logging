@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import os
 import cv2
 import numpy as np
@@ -142,7 +144,7 @@ def combine_videos(video_files: list, output_file: str, background_path: str, fo
 def main():
     parser = argparse.ArgumentParser(description="Combine videos with the same prefix created on the same day.")
     parser.add_argument("--codec", help="The codec for the video writer", default="avc1")
-    parser.add_argument("--directory", help="The directory containing the video files", required=True)
+    parser.add_argument("--input_dir", help="The directory containing the video files", required=True)
     parser.add_argument("--output_dir", help="The directory to save the combined videos", required=True)
     parser.add_argument("--background", help="The path to the background image for dividers", default=None)
     parser.add_argument("--pattern", help="Pattern to filter video files", default="*.mp4")
@@ -156,7 +158,7 @@ def main():
     font_path_bd = os.path.join(script_dir, "resources", "Amazon_Ember_Bd.ttf")
     font_path_rg = os.path.join(script_dir, "resources", "Amazon_Ember_Rg.ttf")
 
-    video_files_dict = get_video_files(args.directory, args.pattern)
+    video_files_dict = get_video_files(args.input_dir, args.pattern)
     for (prefix, date), video_files in video_files_dict.items():
         output_file = os.path.join(args.output_dir, f"{prefix}-{date}.mp4")
         combine_videos(video_files, output_file, args.background, font_path_bd, font_path_rg, codec=args.codec)

@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import argparse
 import datetime
 import os
@@ -43,6 +44,7 @@ COLOR_BACKGROUND = 'black'
 
 def create_plot(
         action_names: List[str],
+        flip_x: bool,
         height: float, width: float, dpi: int, title: List[str],
         transparent: bool = False) -> matplotlib.figure.Figure:
     """
@@ -50,6 +52,7 @@ def create_plot(
 
     Parameters:
     - action_names (list): A list of action names.
+    - flip_x (bool): Whether to flip the x-axis showing the actions.
     - height (float): The height of the plot in inches.
     - width (float): The width of the plot in inches.
     - dpi (int): The resolution of the plot in dots per inch.
@@ -106,14 +109,19 @@ def create_plot(
         spine.set_edgecolor(COLOR_EDGE)
         spine.set_linewidth(1)
 
-    for i, label in enumerate(action_names[::-1]):
+    if flip_x:
+        action_names_display = action_names[::-1]
+    else:
+        action_names_display = action_names
+
+    for i, label in enumerate(action_names_display):
         ax2.text(i, 0.5, label, ha='center', va='center', rotation=90, color=COLOR_TEXT_SECONDARY, fontproperties=prop_small)
     
     return fig
 
 
 def create_img(
-        step: Dict, bag_info: Dict, img: np.ndarray, grad_img: np.ndarray, action_names: List[str],
+        step: Dict, bag_info: Dict, img: np.ndarray, grad_img: np.ndarray, action_names: List[str], flip_x: bool,
         height: int, width: int, background: np.ndarray = None) -> np.ndarray:
     """
     Create an image with multiple plots and return it as a cv2 MatLike object.
@@ -124,6 +132,7 @@ def create_img(
     img (np.ndarray): The input image to be displayed in the first plot.
     grad_img (np.ndarray): The gradient image to be displayed in the second plot.
     action_names (List[str]): A list of action names.
+    flip_x (bool): Whether to flip the x-axis showing the actions.
     height (int): The height of the resulting image.
     width (int): The width of the resulting image.
     background (np.ndarray): The background image to use for the plot.
@@ -143,7 +152,7 @@ def create_img(
     model_name = '-'.join(name_parts[:-2])
 
     fig = create_plot(
-        action_names, height, width, 72,
+        action_names, flip_x, height, width, 72,
         title=[model_name, "{} {} / {}".format(start_time, timestamp_formatted, step['seq_0'])],
         transparent=transparent)
 
@@ -167,7 +176,10 @@ def create_img(
         max_index = car_result['probability'].idxmax()
         bar_colors[max_index] = COLOR_HIGHLIGHT
 
-        ax[2].bar(x, car_result['probability'][::-1], color=bar_colors[::-1])
+        if flip_x:
+            ax[2].bar(x, car_result['probability'][::-1], color=bar_colors[::-1])
+        else:
+            ax[2].bar(x, car_result['probability'], color=bar_colors)
 
         fig.canvas.draw()
 
@@ -400,7 +412,9 @@ def main():
             action_names.append(str(action['steering_angle']) + u'\N{DEGREE SIGN}' + " "+"%.1f" % action["speed"])
     bag_info = analyze_bag(bag_path)
     utils.print_baginfo(bag_info)
-
+    flip_x = action_space[0]['steering_angle'] < 0
+    print("First steering angle: {} Flip X-axis: {}".format(action_space[0]['steering_angle'], flip_x))
+    
     print("")
     print("Analysed file. Starting processing...")
 
@@ -434,7 +448,7 @@ def main():
                         (_, data, _) = reader.read_next()
                         step, img, grad_img = process_data(data, start_time=bag_info['start_time'], seq=s, cam=cam)
                         async_results.append(pool.apply_async(create_img, (step, bag_info, img,
-                                             grad_img, action_names, HEIGHT, WIDTH, background)))
+                                             grad_img, action_names, flip_x, HEIGHT, WIDTH, background)))
                         steps_data['steps'].append(step)
                         s += 1
                         pbar.update(1)
