@@ -1,32 +1,29 @@
 #!/usr/bin/env python3
-import argparse
-import datetime
 import os
-from multiprocessing import Pool
-from typing import List, Dict, Tuple
-
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
 
+import rclpy.logging
+from typing import List, Dict, Tuple
+import multiprocessing as mp
+import queue
+import datetime
+import argparse
 import cv2
-
 import matplotlib
 from matplotlib import gridspec, pyplot as plt
 from matplotlib import font_manager as fm, rcParams
-
 import numpy as np
 import psutil
 import pandas as pd
-
 from cv_bridge import CvBridge
 from rclpy.serialization import deserialize_message
 from tqdm import tqdm
-
 from deepracer_viz.model.model import Model
 from deepracer_viz.model.metadata import ModelMetadata
 from deepracer_viz.gradcam.cam import GradCam
 from deepracer_interfaces_pkg.msg import InferResultsArray
-
 import utils
+
 
 matplotlib.use("Agg")
 
@@ -42,25 +39,70 @@ COLOR_TEXT_SECONDARY = 'lightgray'
 COLOR_BACKGROUND = 'black'
 
 
+def process_worker(
+        data_queue: mp.Queue, result_queue: mp.Queue, model_file: str, metadata: ModelMetadata, bag_info: dict,
+        background: np.ndarray, action_names: List[str],
+        flip_x: bool):
+    """
+    Worker function to process data frames using a machine learning model and Grad-CAM for visualization.
+
+    Args:
+        data_queue (mp.Queue): Queue from which to read data frames to process.
+        result_queue (mp.Queue): Queue to which to put processed results.
+        model_file (str): Path to the model file.
+        metadata (ModelMetadata): Metadata associated with the model.
+        bag_info (dict): Dictionary containing information about the data bag.
+        background (np.ndarray): Background image to use for visualization.
+        action_names (List[str]): List of action names for labeling.
+        flip_x (bool): Whether to flip the image horizontally.
+
+    Raises:
+        Exception: If an error occurs during frame processing.
+    """
+
+    model = Model.from_file(model_pb_path=model_file, metadata=metadata, log_device_placement=False)
+    with model.session as _:
+        cam = GradCam(model, model.get_conv_outputs())
+
+        while True:
+            try:
+                task_data = data_queue.get(timeout=1)
+                if task_data is None:
+                    break
+
+                index, data = task_data
+                step, img, grad_img = process_frame(data, start_time=bag_info['start_time'], seq=index, cam=cam)
+                encimg = create_img(step, bag_info, img, grad_img, action_names,
+                                    flip_x, HEIGHT, WIDTH, background.copy())
+
+                result_queue.put((index, step, encimg))
+
+            except queue.Empty:
+                continue
+
+            except Exception as e:
+                print(f"Error processing frame: {e}")
+                raise
+
+
 def create_plot(
         action_names: List[str],
-        flip_x: bool,
-        height: float, width: float, dpi: int, title: List[str],
+        flip_x: bool, height: float, width: float, dpi: int, title: List[str],
         transparent: bool = False) -> matplotlib.figure.Figure:
     """
     Create a plot with four subplots using matplotlib.
 
-    Parameters:
-    - action_names (list): A list of action names.
-    - flip_x (bool): Whether to flip the x-axis showing the actions.
-    - height (float): The height of the plot in inches.
-    - width (float): The width of the plot in inches.
-    - dpi (int): The resolution of the plot in dots per inch.
-    - title List(str): The titles of the plot.
-    - transparent (bool): Whether the plot should have a transparent background.
+    Args:
+        action_names (List[str]): A list of action names.
+        flip_x (bool): Whether to flip the x-axis showing the actions.
+        height (float): The height of the plot in inches.
+        width (float): The width of the plot in inches.
+        dpi (int): The resolution of the plot in dots per inch.
+        title (List[str]): The titles of the plot.
+        transparent (bool): Whether the plot should have a transparent background.
 
     Returns:
-    - fig (Figure): The matplotlib Figure object containing the plot.
+        matplotlib.figure.Figure: The matplotlib Figure object containing the plot.
     """
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -80,8 +122,6 @@ def create_plot(
 
     # Add right-aligned suptitle
     fig.text(0.975, 0.95, title[1], color=COLOR_TEXT_SECONDARY, fontproperties=prop_big, ha='right')
-
-    x = list(range(0, len(action_names)))
 
     spec = gridspec.GridSpec(ncols=4, nrows=2,
                              width_ratios=[1, 1, 1, 1], wspace=0.1,
@@ -115,30 +155,31 @@ def create_plot(
         action_names_display = action_names
 
     for i, label in enumerate(action_names_display):
-        ax2.text(i, 0.5, label, ha='center', va='center', rotation=90, color=COLOR_TEXT_SECONDARY, fontproperties=prop_small)
-    
+        ax2.text(i, 0.5, label, ha='center', va='center', rotation=90,
+                 color=COLOR_TEXT_SECONDARY, fontproperties=prop_small)
+
     return fig
 
 
 def create_img(
-        step: Dict, bag_info: Dict, img: np.ndarray, grad_img: np.ndarray, action_names: List[str], flip_x: bool,
-        height: int, width: int, background: np.ndarray = None) -> np.ndarray:
+        step: Dict, bag_info: Dict, img: np.ndarray, grad_img: np.ndarray, action_names: List[str],
+        flip_x: bool, height: int, width: int, background: np.ndarray = None) -> np.ndarray:
     """
     Create an image with multiple plots and return it as a cv2 MatLike object.
 
     Args:
-    step (Dict): A dictionary containing step information.
-    bag_info (Dict): A dictionary containing information about the bag file.
-    img (np.ndarray): The input image to be displayed in the first plot.
-    grad_img (np.ndarray): The gradient image to be displayed in the second plot.
-    action_names (List[str]): A list of action names.
-    flip_x (bool): Whether to flip the x-axis showing the actions.
-    height (int): The height of the resulting image.
-    width (int): The width of the resulting image.
-    background (np.ndarray): The background image to use for the plot.
+        step (Dict): A dictionary containing step information.
+        bag_info (Dict): A dictionary containing information about the bag file.
+        img (np.ndarray): The input image to be displayed in the first plot.
+        grad_img (np.ndarray): The gradient image to be displayed in the second plot.
+        action_names (List[str]): A list of action names.
+        flip_x (bool): Whether to flip the x-axis showing the actions.
+        height (int): The height of the resulting image.
+        width (int): The width of the resulting image.
+        background (np.ndarray): The background image to use for the plot.
 
     Returns:
-    np.ndarray: The resulting image as a cv2 MatLike object.
+        np.ndarray: The resulting image as a cv2 MatLike object.
     """
 
     timestamp_formatted = "{:02}:{:05.2f}".format(int(step['timestamp'] // 60), step['timestamp'] % 60)
@@ -192,7 +233,7 @@ def create_img(
         if background is not None:
             gradient_alpha_rgb_mul, one_minus_gradient_alpha = utils.get_gradient_values(img)
             img = cv2.cvtColor(utils.apply_gradient(background, gradient_alpha_rgb_mul,
-                                              one_minus_gradient_alpha), cv2.COLOR_RGBA2BGR)
+                                                    one_minus_gradient_alpha), cv2.COLOR_RGBA2BGR)
         else:
             img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
 
@@ -201,23 +242,21 @@ def create_img(
         return encimg
 
 
-def process_data(data: bytes, start_time: float, seq: int, cam: GradCam) -> Tuple[Dict, np.ndarray, np.ndarray]:
+def process_frame(data: bytes, start_time: float, seq: int, cam: GradCam) -> Tuple[Dict, np.ndarray, np.ndarray]:
     """
     Process data from a bag file.
 
     Args:
         data (bytes): The data to process.
         start_time (float): The start time of the data.
-        start_seq (int): The number of the first frame of the data.
+        seq (int): The sequence number of the frame.
         cam (GradCam): The GradCam object used for image processing.
 
     Returns:
-        Tuple[Dict, np.ndarray, np.ndarray]: A tuple containing the processed data, the original image,
-        and the processed image.
+        Tuple[Dict, np.ndarray, np.ndarray]: A tuple containing the processed data, the original image, and the processed image.
 
     Raises:
         Exception: If an error occurs during the processing.
-
     """
     try:
         step = {}
@@ -271,8 +310,7 @@ def analyze_bag(bag_path: str) -> Dict:
         bag_path (str): The path to the bag file.
 
     Returns:
-        dict: A dictionary containing information about the bag file, including start time, FPS, total frames,
-              step difference, elapsed time, action space size, and image shape.
+        Dict: A dictionary containing information about the bag file, including start time, FPS, total frames, step difference, elapsed time, action space size, and image shape.
     """
 
     bag_info = {}
@@ -321,7 +359,7 @@ def analyze_bag(bag_path: str) -> Dict:
     bag_info['elapsed_time'] = df['timestamp'].max()
     bag_info['action_space_size'] = len(msg.results)
     bag_info['image_shape'] = tmp_img.shape
-    
+
     return bag_info
 
 
@@ -348,6 +386,9 @@ def main():
     Returns:
         None
     """
+    # Set logging level for rosbag2_storage to WARN to suppress info messages
+    rclpy.logging.set_logger_level('rosbag2_storage', rclpy.logging.LoggingSeverity.WARN)
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--codec", help="The codec for the video writer", default="avc1")
     parser.add_argument("--bag_path", help="The path to the rosbag file", required=True)
@@ -384,8 +425,6 @@ def main():
     if metadata.action_space_type == 'continuous':
         return NotImplementedError("Continuous action space not supported.")
 
-    model = Model.from_file(model_pb_path=model_pb, metadata=metadata, log_device_placement=False)
-
     print("Using model: {}".format(model_path))
     print("")
 
@@ -394,6 +433,7 @@ def main():
     else:
         frame_limit = float("inf")
 
+    # Prepare action names
     action_names = []
     action_space = metadata.action_space.action_space
     max_steering_angle = max(float(action['steering_angle']) for action in action_space)
@@ -414,9 +454,13 @@ def main():
     utils.print_baginfo(bag_info)
     flip_x = action_space[0]['steering_angle'] < 0
     print("First steering angle: {} Flip X-axis: {}".format(action_space[0]['steering_angle'], flip_x))
-    
+
+    # Key data points
+    worker_count = int((psutil.cpu_count(logical=False))-1)
+    frame_limit = int(min(bag_info['total_frames'], frame_limit))
+
     print("")
-    print("Analysed file. Starting processing...")
+    print("Analysed file. Starting processing of {} frames with {} workers.".format(frame_limit, worker_count))
 
     if args.background:
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -427,59 +471,81 @@ def main():
     else:
         background = None
 
+    # Create video writer
     CODEC = args.codec
     output_file = "{}.mp4".format(bag_path)
     writer = cv2.VideoWriter(output_file, cv2.VideoWriter_fourcc(
         *CODEC), int(round(bag_info['fps'], 0)), (WIDTH, HEIGHT))
 
-    s = 0
     steps_data = {'steps': []}
-    async_results = []
 
     try:
-        with Pool(psutil.cpu_count(logical=False)-1) as pool:
-            with model.session as sess:
-                cam = GradCam(model, model.get_conv_outputs())
-                reader = utils.get_reader(bag_path, topics=['/inference_pkg/rl_results'])
+        # Use a separate process to read from the stream
+        data_queue = mp.Queue()
+        result_queue = mp.Queue()
+        stream_reader = mp.Process(target=utils.read_stream, args=(
+            data_queue, bag_path, ['/inference_pkg/rl_results'], frame_limit))
+        stream_reader.start()
 
-                pbar = tqdm(total=min(bag_info['total_frames'], frame_limit), desc="Loading messages", unit="messages")
-                while reader.has_next() and s < frame_limit:
-                    try:
-                        (_, data, _) = reader.read_next()
-                        step, img, grad_img = process_data(data, start_time=bag_info['start_time'], seq=s, cam=cam)
-                        async_results.append(pool.apply_async(create_img, (step, bag_info, img,
-                                             grad_img, action_names, flip_x, HEIGHT, WIDTH, background)))
-                        steps_data['steps'].append(step)
-                        s += 1
-                        pbar.update(1)
-                    except Exception as e:
-                        print(f"Error processing data: {e}")
-                        raise
+        # Create worker processes
+        worker_processes = []
+        for _ in range(worker_count):
+            p = mp.Process(target=process_worker, args=(data_queue, result_queue,
+                           model_pb, metadata, bag_info, background, action_names, flip_x))
+            p.start()
+            worker_processes.append(p)
 
-                pbar.close()
+        pbar_proc = tqdm(total=frame_limit, desc="Processing messages", unit="msgs", smoothing=0.1)
+        pbar_write = tqdm(total=min(bag_info['total_frames'], frame_limit),
+                    desc="Writing image frames", unit="frames", smoothing=0.1)
 
-            pbar = tqdm(total=min(bag_info['total_frames'], frame_limit), desc="Writing image frames", unit="frames")
-            for res in async_results:
-                try:
-                    encimg = res.get()
-                    writer.write(cv2.imdecode(np.frombuffer(encimg, dtype=np.uint8), cv2.IMREAD_COLOR))
-                    pbar.update(1)
-                except Exception as e:
-                    print(f"Error writing frame: {e}")
-                    raise
+        # Read results from the result queue, stop once we have received expected number of frames
+        results = []
+        while True:
+            try:
+                results.append(result_queue.get(timeout=0.1))
+                pbar_proc.update(1)
 
-            pbar.close()
+            except queue.Empty:
+                if len(results) == frame_limit:
+                    break
+                else:
+                    continue
 
-        writer.release()
+        # Wait for the stream reader to finish, then send termination
+        # to the worker processes.
+        stream_reader.join()
+        for _ in worker_processes:
+            data_queue.put(None)
+
+        for _, step, encimg in sorted(results, key=lambda x: x[0]):
+            try:
+                steps_data['steps'].append(step)
+                writer.write(cv2.imdecode(np.frombuffer(encimg, dtype=np.uint8), cv2.IMREAD_COLOR))
+                pbar_write.update(1)
+            except Exception as e:
+                print(f"Error writing frame: {e}")
+                raise
+
+        
+        pbar_proc.close()
+        pbar_write.close()
+
     except Exception as e:
         print(f"Unexpected error: {e}")
         raise
+
+    finally:
+        writer.release()
+        for p in worker_processes:
+            p.join()
 
     df = pd.json_normalize(steps_data['steps'])
     del steps_data
 
     step_diff = df['seq'].max() - df['seq'].min()
     fps = step_diff / df['timestamp'].max()
+    print("")
     print("Start time: {}".format(datetime.datetime.fromtimestamp(bag_info['start_time'])))
     print("Loaded {} steps from {}.".format(len(df.index), step_diff + 1))
     print("Duration: {:.2f} seconds".format(df['timestamp'].max()))
@@ -495,12 +561,11 @@ def main():
                               'car_action.probability', 'tf_action.probability', 'action_agree', 'action_diff']]
         print(action_analysis.describe())
 
-    print("")
     print("Created video file: {}".format(output_file))
 
 
 if __name__ == "__main__":
-    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # or any {'0', '1', '2'}
     import tensorflow as tf
     tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
     main()
