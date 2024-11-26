@@ -21,7 +21,9 @@ def main():
     parser.add_argument("--frame_limit", help="Max number of frames to process", default=None)
     parser.add_argument("--describe", help="Describe the actions", action="store_true")
     parser.add_argument("--relative_labels", help="Make labels relative, not fixed to value in action space", action="store_true")
-    parser.add_argument("--background", help="Add a background to the video", action="store_true", default=True)
+    parser.add_argument("--background", dest="background", help="Add a background to the video", action="store_true")
+    parser.add_argument("--no-background", dest="background", help="Do not add a background to the video", action="store_false")
+    parser.set_defaults(background=True)
     parser.add_argument("--pattern", help="Pattern to filter bag files", default="*")
 
     args = parser.parse_args()
@@ -56,9 +58,10 @@ def main():
                 '--bag_path', bag_path,
                 '--model_path', model_path,
                 '--codec', args.codec,
-                '--relative_labels', str(args.relative_labels),
-                '--background', str(args.background)
+                '--relative_labels', str(args.relative_labels)
             ]
+            if args.background:
+                cmd.extend(['--background'])
             if args.frame_limit:
                 cmd.extend(['--frame_limit', args.frame_limit])
             if args.describe:

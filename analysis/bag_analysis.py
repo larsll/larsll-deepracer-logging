@@ -73,7 +73,7 @@ def process_worker(
                 index, data = task_data
                 step, img, grad_img = process_frame(data, start_time=bag_info['start_time'], seq=index, cam=cam)
                 encimg = create_img(step, bag_info, img, grad_img, action_names,
-                                    flip_x, HEIGHT, WIDTH, background.copy())
+                                    flip_x, HEIGHT, WIDTH, background)
 
                 result_queue.put((index, step, encimg))
 
@@ -232,7 +232,7 @@ def create_img(
 
         if background is not None:
             gradient_alpha_rgb_mul, one_minus_gradient_alpha = utils.get_gradient_values(img)
-            img = cv2.cvtColor(utils.apply_gradient(background, gradient_alpha_rgb_mul,
+            img = cv2.cvtColor(utils.apply_gradient(background.copy(), gradient_alpha_rgb_mul,
                                                     one_minus_gradient_alpha), cv2.COLOR_RGBA2BGR)
         else:
             img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
@@ -397,7 +397,7 @@ def main():
     parser.add_argument("--describe", help="Describe the actions", default=False)
     parser.add_argument("--relative_labels",
                         help="Make labels relative, not fixed to value in action space", default=False, type=bool)
-    parser.add_argument("--background", help="Add a background to the video", default=True, type=bool)
+    parser.add_argument("--background", help="Add a background to the video", default=False, type=bool)
 
     args = parser.parse_args()
 
@@ -456,7 +456,7 @@ def main():
     print("First steering angle: {} Flip X-axis: {}".format(action_space[0]['steering_angle'], flip_x))
 
     # Key data points
-    worker_count = int((psutil.cpu_count(logical=False))-1)
+    worker_count = int((psutil.cpu_count(logical=False))-2)
     frame_limit = int(min(bag_info['total_frames'], frame_limit))
 
     print("")
