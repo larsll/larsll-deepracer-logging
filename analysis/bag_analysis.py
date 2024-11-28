@@ -40,7 +40,7 @@ COLOR_BACKGROUND = 'black'
 
 
 def process_worker(
-        data_queue: mp.Queue, result_queue: mp.Queue, model_file: str, metadata: ModelMetadata, bag_info: dict,
+        data_queue: mp.Queue, result: Tuple, model_file: str, metadata: ModelMetadata, bag_info: dict,
         background: np.ndarray, action_names: List[str],
         flip_x: bool):
     """
@@ -60,6 +60,8 @@ def process_worker(
         Exception: If an error occurs during frame processing.
     """
 
+    result_list, list_lock = result
+
     model = Model.from_file(model_pb_path=model_file, metadata=metadata, log_device_placement=False)
     with model.session as _:
         cam = GradCam(model, model.get_conv_outputs())
@@ -75,7 +77,8 @@ def process_worker(
                 encimg = create_img(step, bag_info, img, grad_img, action_names,
                                     flip_x, HEIGHT, WIDTH, background)
 
-                result_queue.put((index, step, encimg))
+                with list_lock:
+                    result_list.append([index, step, encimg])
 
             except queue.Empty:
                 continue
@@ -456,7 +459,7 @@ def main():
     print("First steering angle: {} Flip X-axis: {}".format(action_space[0]['steering_angle'], flip_x))
 
     # Key data points
-    worker_count = int((psutil.cpu_count(logical=False))-2)
+    worker_count = int((psutil.cpu_count(logical=False))-1)
     frame_limit = int(min(bag_info['total_frames'], frame_limit))
 
     print("")
@@ -480,9 +483,14 @@ def main():
     steps_data = {'steps': []}
 
     try:
-        # Use a separate process to read from the stream
+
+        # Create queues for data and results
         data_queue = mp.Queue()
-        result_queue = mp.Queue()
+        manager = mp.Manager()
+        result_list = manager.list()
+        list_lock = manager.Lock()
+
+        # Use a separate process to read from the stream
         stream_reader = mp.Process(target=utils.read_stream, args=(
             data_queue, bag_path, ['/inference_pkg/rl_results'], frame_limit))
         stream_reader.start()
@@ -490,7 +498,7 @@ def main():
         # Create worker processes
         worker_processes = []
         for _ in range(worker_count):
-            p = mp.Process(target=process_worker, args=(data_queue, result_queue,
+            p = mp.Process(target=process_worker, args=(data_queue, (result_list, list_lock),
                            model_pb, metadata, bag_info, background, action_names, flip_x))
             p.start()
             worker_processes.append(p)
@@ -503,16 +511,18 @@ def main():
         # Priority queue to store results
         pq = []
         expected_index = 1
-        
+
         while True:
             try:
-                result = result_queue.get(timeout=0.1)
-                if len(pq) == 0 and expected_index == 1:
-                    pbar_proc.reset()
-                    pbar_write.reset()
+                while len(result_list) > 0:
+                    with list_lock:
+                        result = result_list.pop(0)
+                    if len(pq) == 0 and expected_index == 1:
+                        pbar_proc.reset()
+                        pbar_write.reset()
 
-                heapq.heappush(pq, result)
-                pbar_proc.update(1)
+                    heapq.heappush(pq, result)
+                    pbar_proc.update(1)
 
                 # Process results in order
                 while pq and pq[0][0] == expected_index:
@@ -522,11 +532,8 @@ def main():
                     pbar_write.update(1)
                     expected_index += 1
 
-            except queue.Empty:
                 if len(steps_data['steps']) == frame_limit:
                     break
-                else:
-                    continue
 
             except Exception as e:
                 print(f"Error writing frame: {e}")
