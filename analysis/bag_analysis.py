@@ -18,7 +18,7 @@ import psutil
 import pandas as pd
 from cv_bridge import CvBridge
 from rclpy.serialization import deserialize_message
-from tqdm import tqdm
+from tqdm.auto import tqdm
 from deepracer_viz.model.model import Model
 from deepracer_viz.model.metadata import ModelMetadata
 from deepracer_viz.gradcam.cam import GradCam
@@ -38,11 +38,14 @@ COLOR_TEXT_PRIMARY = '#a166ff'
 COLOR_TEXT_SECONDARY = 'lightgray'
 COLOR_BACKGROUND = 'black'
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+FONT_BIG = fm.FontProperties(fname=os.path.join(SCRIPT_DIR, "resources", "Amazon_Ember_Rg.ttf"), size=20)
+FONT_BIG_BD = fm.FontProperties(fname=os.path.join(SCRIPT_DIR, "resources", "Amazon_Ember_Bd.ttf"), size=25)
+FONT_SMALL = fm.FontProperties(fname=os.path.join(SCRIPT_DIR, "resources", "Amazon_Ember_Rg.ttf"), size=15)
 
 def process_worker(
         data_queue: mp.Queue, result: Tuple, model_file: str, metadata: ModelMetadata, bag_info: dict,
-        background: np.ndarray, action_names: List[str],
-        flip_x: bool):
+        background: np.ndarray, action_names: List[str], flip_x: bool):
     """
     Worker function to process data frames using a machine learning model and Grad-CAM for visualization.
 
@@ -61,6 +64,7 @@ def process_worker(
     """
 
     result_list, list_lock = result
+    fig = create_plot(action_names, flip_x, HEIGHT, WIDTH, 72, transparent=(background is not None))
 
     model = Model.from_file(model_pb_path=model_file, metadata=metadata, log_device_placement=False)
     with model.session as _:
@@ -74,8 +78,7 @@ def process_worker(
 
                 index, data = task_data
                 step, img, grad_img = process_frame(data, start_time=bag_info['start_time'], seq=index, cam=cam)
-                encimg = create_img(step, bag_info, img, grad_img, action_names,
-                                    flip_x, HEIGHT, WIDTH, background)
+                encimg = create_img(fig, step, bag_info, img, grad_img, action_names, flip_x, background)
 
                 with list_lock:
                     result_list.append([index, step, encimg])
@@ -86,11 +89,12 @@ def process_worker(
             except Exception as e:
                 print(f"Error processing frame: {e}")
                 raise
-
+    
+    plt.close(fig)
 
 def create_plot(
         action_names: List[str],
-        flip_x: bool, height: float, width: float, dpi: int, title: List[str],
+        flip_x: bool, height: float, width: float, dpi: int,
         transparent: bool = False) -> matplotlib.figure.Figure:
     """
     Create a plot with four subplots using matplotlib.
@@ -101,17 +105,11 @@ def create_plot(
         height (float): The height of the plot in inches.
         width (float): The width of the plot in inches.
         dpi (int): The resolution of the plot in dots per inch.
-        title (List[str]): The titles of the plot.
         transparent (bool): Whether the plot should have a transparent background.
 
     Returns:
         matplotlib.figure.Figure: The matplotlib Figure object containing the plot.
     """
-
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    prop_big = fm.FontProperties(fname=os.path.join(script_dir, "resources", "Amazon_Ember_Rg.ttf"), size=20)
-    prop_big_bd = fm.FontProperties(fname=os.path.join(script_dir, "resources", "Amazon_Ember_Bd.ttf"), size=25)
-    prop_small = fm.FontProperties(fname=os.path.join(script_dir, "resources", "Amazon_Ember_Rg.ttf"), size=15)
 
     fig = plt.figure(figsize=(width/dpi, height/dpi), dpi=dpi)
 
@@ -119,12 +117,6 @@ def create_plot(
         fig.patch.set_alpha(0.0)
     else:
         fig.set_facecolor(COLOR_BACKGROUND)
-
-    # Add left-aligned suptitle
-    fig.text(0.025, 0.95, title[0], color=COLOR_TEXT_PRIMARY, fontproperties=prop_big_bd, ha='left')
-
-    # Add right-aligned suptitle
-    fig.text(0.975, 0.95, title[1], color=COLOR_TEXT_SECONDARY, fontproperties=prop_big, ha='right')
 
     spec = gridspec.GridSpec(ncols=4, nrows=2,
                              width_ratios=[1, 1, 1, 1], wspace=0.1,
@@ -159,26 +151,25 @@ def create_plot(
 
     for i, label in enumerate(action_names_display):
         ax2.text(i, 0.5, label, ha='center', va='center', rotation=90,
-                 color=COLOR_TEXT_SECONDARY, fontproperties=prop_small)
+                 color=COLOR_TEXT_SECONDARY, fontproperties=FONT_SMALL)
 
     return fig
 
-
 def create_img(
+        fig: matplotlib.figure.Figure,
         step: Dict, bag_info: Dict, img: np.ndarray, grad_img: np.ndarray, action_names: List[str],
-        flip_x: bool, height: int, width: int, background: np.ndarray = None) -> np.ndarray:
+        flip_x: bool, background: np.ndarray = None) -> np.ndarray:
     """
     Create an image with multiple plots and return it as a cv2 MatLike object.
 
     Args:
+        fig (matplotlib.figure.Figure): The matplotlib Figure object containing the plot.  
         step (Dict): A dictionary containing step information.
         bag_info (Dict): A dictionary containing information about the bag file.
         img (np.ndarray): The input image to be displayed in the first plot.
         grad_img (np.ndarray): The gradient image to be displayed in the second plot.
         action_names (List[str]): A list of action names.
         flip_x (bool): Whether to flip the x-axis showing the actions.
-        height (int): The height of the resulting image.
-        width (int): The width of the resulting image.
         background (np.ndarray): The background image to use for the plot.
 
     Returns:
@@ -186,7 +177,6 @@ def create_img(
     """
 
     timestamp_formatted = "{:02}:{:05.2f}".format(int(step['timestamp'] // 60), step['timestamp'] % 60)
-    transparent = background is not None
 
     # Split bag_info['name'] into parts
     name_parts = bag_info['name'].split('-')
@@ -195,54 +185,55 @@ def create_img(
     # Create another string with the rest
     model_name = '-'.join(name_parts[:-2])
 
-    fig = create_plot(
-        action_names, flip_x, height, width, 72,
-        title=[model_name, "{} {} / {}".format(start_time, timestamp_formatted, step['seq_0'])],
-        transparent=transparent)
+    # Update left-aligned suptitle
+    fig.texts.clear()
+    fig.text(0.025, 0.95, model_name, color=COLOR_TEXT_PRIMARY, fontproperties=FONT_BIG_BD, ha='left')
+
+    # Add right-aligned suptitle
+    fig.text(0.975, 0.95, "{} {} / {}".format(start_time, timestamp_formatted, step['seq_0']), color=COLOR_TEXT_SECONDARY, fontproperties=FONT_BIG, ha='right')
 
     x = list(range(0, len(action_names)))
 
     car_result = pd.DataFrame(step['car_results'])
 
     ax = fig.get_axes()
-
     for a in ax:
         for p in set(a.containers):
             p.remove()
         for i in set(a.images):
             i.remove()
 
-        ax[0].imshow(img)
-        ax[1].imshow(grad_img)
+    ax[0].imshow(img)
+    ax[1].imshow(grad_img)
 
-        # Highlight the highest bar in a different color
-        bar_colors = [COLOR_EDGE] * len(car_result['probability'])
-        max_index = car_result['probability'].idxmax()
-        bar_colors[max_index] = COLOR_HIGHLIGHT
+    # Highlight the highest bar in a different color
+    bar_colors = [COLOR_EDGE] * len(car_result['probability'])
+    max_index = car_result['probability'].idxmax()
+    bar_colors[max_index] = COLOR_HIGHLIGHT
 
-        if flip_x:
-            ax[2].bar(x, car_result['probability'][::-1], color=bar_colors[::-1])
-        else:
-            ax[2].bar(x, car_result['probability'], color=bar_colors)
+    if flip_x:
+        ax[2].bar(x, car_result['probability'][::-1], color=bar_colors[::-1])
+    else:
+        ax[2].bar(x, car_result['probability'], color=bar_colors)
 
-        fig.canvas.draw()
+    fig.canvas.draw()
 
-        buf = fig.canvas.buffer_rgba()
+    # Get the canvas buffer and convert it to a numpy array
+    buf = fig.canvas.buffer_rgba()
+    ncols, nrows = fig.canvas.get_width_height()
+    img = np.frombuffer(buf, dtype=np.uint8).reshape(nrows, ncols, 4)
 
-        ncols, nrows = fig.canvas.get_width_height()
-        plt.close(fig)
-        img = np.frombuffer(buf, dtype=np.uint8).reshape(nrows, ncols, 4)
+    # Apply background if available
+    if background is not None:
+        gradient_alpha_rgb_mul, one_minus_gradient_alpha = utils.get_gradient_values(img)
+        img = cv2.cvtColor(utils.apply_gradient(background.copy(), gradient_alpha_rgb_mul,
+                                                one_minus_gradient_alpha), cv2.COLOR_RGBA2BGR)
+    else:
+        img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
 
-        if background is not None:
-            gradient_alpha_rgb_mul, one_minus_gradient_alpha = utils.get_gradient_values(img)
-            img = cv2.cvtColor(utils.apply_gradient(background.copy(), gradient_alpha_rgb_mul,
-                                                    one_minus_gradient_alpha), cv2.COLOR_RGBA2BGR)
-        else:
-            img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
-
-        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 90]  # Adjust the quality as needed
-        _, encimg = cv2.imencode('.jpg', img, encode_param)
-        return encimg
+    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 95]  # Adjust the quality as needed
+    _, encimg = cv2.imencode('.jpg', img, encode_param)
+    return encimg
 
 
 def process_frame(data: bytes, start_time: float, seq: int, cam: GradCam) -> Tuple[Dict, np.ndarray, np.ndarray]:
@@ -459,16 +450,15 @@ def main():
     print("First steering angle: {} Flip X-axis: {}".format(action_space[0]['steering_angle'], flip_x))
 
     # Key data points
-    worker_count = int((psutil.cpu_count(logical=False))-1)
+    worker_count = int((psutil.cpu_count(logical=False))*3/4)
     frame_limit = int(min(bag_info['total_frames'], frame_limit))
 
     print("")
     print("Analysed file. Starting processing of {} frames with {} workers.".format(frame_limit, worker_count))
 
     if args.background:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
         background_path = os.path.join(
-            script_dir, "resources",
+            SCRIPT_DIR, "resources",
             "AWS-Deepracer_Background_Machine-Learning.928f7bc20a014c7c7823e819ce4c2a84af17597c.jpg")
         background = utils.load_background_image(background_path, WIDTH, HEIGHT)
     else:
@@ -503,29 +493,31 @@ def main():
             p.start()
             worker_processes.append(p)
 
-        pbar_proc = tqdm(total=frame_limit, desc="Processing messages", unit="msgs", smoothing=0.1)
+        pbar_proc = tqdm(total=frame_limit, desc="Processing messages", unit="msgs", smoothing=0.1, leave=True)
         pbar_write = tqdm(total=min(bag_info['total_frames'], frame_limit),
-                    desc="Writing image frames", unit="frames", smoothing=0.1)
+                    desc="Writing image frames", unit="frames", smoothing=0.1, leave=True)
 
         # Read results from the result queue, stop once we have received expected number of frames
         # Priority queue to store results
         pq = []
         expected_index = 1
+        received = 0
 
         while True:
             try:
                 while len(result_list) > 0:
                     with list_lock:
                         result = result_list.pop(0)
-                    if len(pq) == 0 and expected_index == 1:
-                        pbar_proc.reset()
-                        pbar_write.reset()
 
                     heapq.heappush(pq, result)
+                    received += 1
                     pbar_proc.update(1)
 
+                    if received == frame_limit:
+                        pbar_proc.refresh()
+
                 # Process results in order
-                while pq and pq[0][0] == expected_index:
+                if pq and pq[0][0] == expected_index:
                     _, step, encimg = heapq.heappop(pq)
                     steps_data['steps'].append(step)
                     writer.write(cv2.imdecode(np.frombuffer(encimg, dtype=np.uint8), cv2.IMREAD_COLOR))
@@ -533,6 +525,9 @@ def main():
                     expected_index += 1
 
                 if len(steps_data['steps']) == frame_limit:
+                    pbar_write.refresh()                        
+                    pbar_proc.close()                   
+                    pbar_write.close()
                     break
 
             except Exception as e:
@@ -544,9 +539,6 @@ def main():
         stream_reader.join()
         for _ in worker_processes:
             data_queue.put(None)
-        
-        pbar_proc.close()
-        pbar_write.close()
 
     except Exception as e:
         print(f"Unexpected error: {e}")

@@ -54,6 +54,6 @@ ADD . /workspace/analysis
 EXPOSE 8888
 WORKDIR /workspace/analysis
 ENV PATH="$PATH:/workspace/analysis"
-VOLUME ["/workspace/analysis", "/root/.aws", "/workspace/logs", "/workspace/models"]
+VOLUME ["/workspace/logs", "/workspace/models"]
 ENTRYPOINT [ "/workspace/analysis/entrypoint.sh" ]
 CMD bash -c 'jupyter lab --ip=0.0.0.0 --port=8888 --allow-root --no-browser'
