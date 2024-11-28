@@ -2,7 +2,6 @@
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # or any {'0', '1', '2'}
 
-import rclpy.logging
 from typing import List, Dict, Tuple
 import multiprocessing as mp
 import heapq
@@ -16,9 +15,13 @@ from matplotlib import font_manager as fm, rcParams
 import numpy as np
 import psutil
 import pandas as pd
-from cv_bridge import CvBridge
-from rclpy.serialization import deserialize_message
 from tqdm.auto import tqdm
+import signal
+import time
+
+from cv_bridge import CvBridge
+import rclpy.logging
+from rclpy.serialization import deserialize_message
 from deepracer_viz.model.model import Model
 from deepracer_viz.model.metadata import ModelMetadata
 from deepracer_viz.gradcam.cam import GradCam
@@ -42,6 +45,15 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 FONT_BIG = fm.FontProperties(fname=os.path.join(SCRIPT_DIR, "resources", "Amazon_Ember_Rg.ttf"), size=20)
 FONT_BIG_BD = fm.FontProperties(fname=os.path.join(SCRIPT_DIR, "resources", "Amazon_Ember_Bd.ttf"), size=25)
 FONT_SMALL = fm.FontProperties(fname=os.path.join(SCRIPT_DIR, "resources", "Amazon_Ember_Rg.ttf"), size=15)
+
+procs = []
+
+def signal_handler(sig, frame):
+    for p in procs:
+        p.terminate()
+
+    print("All worker processes stopped.")
+    exit(1)
 
 def process_worker(
         data_queue: mp.Queue, result: Tuple, model_file: str, metadata: ModelMetadata, bag_info: dict,
@@ -483,15 +495,15 @@ def main():
         # Use a separate process to read from the stream
         stream_reader = mp.Process(target=utils.read_stream, args=(
             data_queue, bag_path, ['/inference_pkg/rl_results'], frame_limit))
+        procs.append(stream_reader)
         stream_reader.start()
 
         # Create worker processes
-        worker_processes = []
         for _ in range(worker_count):
             p = mp.Process(target=process_worker, args=(data_queue, (result_list, list_lock),
                            model_pb, metadata, bag_info, background, action_names, flip_x))
             p.start()
-            worker_processes.append(p)
+            procs.append(p)
 
         pbar_proc = tqdm(total=frame_limit, desc="Processing messages", unit="msgs", smoothing=0.1, leave=True)
         pbar_write = tqdm(total=min(bag_info['total_frames'], frame_limit),
@@ -537,7 +549,8 @@ def main():
         # Wait for the stream reader to finish, then send termination
         # to the worker processes.
         stream_reader.join()
-        for _ in worker_processes:
+        procs.pop(0)
+        for _ in range(worker_count):
             data_queue.put(None)
 
     except Exception as e:
@@ -546,7 +559,8 @@ def main():
 
     finally:
         writer.release()
-        for p in worker_processes:
+        for p in procs:
+            p.terminate()
             p.join()
 
     df = pd.json_normalize(steps_data['steps'])
@@ -574,6 +588,8 @@ def main():
 
 
 if __name__ == "__main__":
+    signal.signal(signal.SIGINT, signal_handler)
+
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # or any {'0', '1', '2'}
     import tensorflow as tf
     tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
