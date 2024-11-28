@@ -27,7 +27,7 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
 	apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install tensorflow and visualization
-RUN pip3 install -U --no-cache-dir 'tensorflow-cpu<2.10' \
+RUN pip3 install -U --no-cache-dir 'tensorflow-cpu<2.17' \
                                python-resize-image \
                                'deepracer-utils>=1.0.3' \
                                'jupyterlab>=2.0.0' \ 
@@ -54,6 +54,6 @@ ADD . /workspace/analysis
 EXPOSE 8888
 WORKDIR /workspace/analysis
 ENV PATH="$PATH:/workspace/analysis"
-VOLUME ["/workspace/analysis", "/root/.aws", "/workspace/logs", "/workspace/models"]
+VOLUME ["/workspace/logs", "/workspace/models"]
 ENTRYPOINT [ "/workspace/analysis/entrypoint.sh" ]
 CMD bash -c 'jupyter lab --ip=0.0.0.0 --port=8888 --allow-root --no-browser'

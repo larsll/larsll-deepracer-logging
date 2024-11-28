@@ -1,5 +1,4 @@
 from typing import List, Tuple
-
 import cv2
 import datetime
 import rosbag2_py
@@ -147,3 +146,25 @@ def print_baginfo(bag_info: dict):
         bag_info['image_shape'][2]))
     print("Total messages: {}, expected duration: {:.1f}".format(
         bag_info['total_frames'], bag_info['total_frames']/bag_info['fps']))
+    
+
+def read_stream(data_queue, bag_path, topics, frame_limit):
+    """
+    Reads data from a bag file and puts it into a queue.
+
+    Args:
+        data_queue (queue.Queue): The queue to put the data into.
+        bag_path (str): The path to the bag file.
+        topics (list): The list of topics to read from the bag file.
+        frame_limit (int): The maximum number of frames to read.
+
+    Returns:
+        None
+    """
+    s = 0
+    reader = get_reader(bag_path, topics=topics)
+
+    while reader.has_next() and s < frame_limit:
+        (_, data, _) = reader.read_next()
+        s += 1
+        data_queue.put((s, data))
