@@ -6,6 +6,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import argparse
 import fnmatch
+from tqdm import tqdm
 
 def get_video_files(directory: str, pattern: str) -> dict:
     """
@@ -131,11 +132,14 @@ def combine_videos(video_files: list, output_file: str, background_path: str, fo
         for _ in range(int(fps * 1.5)):  # Display the divider for 1.5 second
             out.write(divider_frame)
 
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                break
-            out.write(frame)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        with tqdm(total=total_frames, desc=f"Processing {os.path.basename(video_file)}", unit="frames") as pbar:
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                out.write(frame)
+                pbar.update(1)
         cap.release()
 
     out.release()

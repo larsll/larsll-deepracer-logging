@@ -70,6 +70,8 @@ def main():
 
             subprocess.run(cmd)
 
+    print("\nFinished processing all bag files. Combining videos...\n")
+
     # After processing all bag files, combine the videos
     combine_videos_script = os.path.join(script_dir, 'combine_videos.py')
     cmd = [
