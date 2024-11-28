@@ -13,7 +13,6 @@ LABEL maintainer="AWS Deepracer Community" \
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     libboost-all-dev \
     python3-pip \
-    python3-opencv \
     ros-humble-image-transport \
     ros-humble-compressed-image-transport \
     ros-humble-cv-bridge \
@@ -22,6 +21,7 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
     libjsoncpp-dev \
     v4l-utils \
     ffmpeg \
+    libx264-dev \
     sudo \
     curl && \
 	apt-get clean && rm -rf /var/lib/apt/lists/*
