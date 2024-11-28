@@ -2,6 +2,11 @@ from typing import List, Tuple
 import cv2
 import datetime
 import rosbag2_py
+import os
+import json
+import tarfile
+
+from deepracer_viz.model.metadata import ModelMetadata
 
 def get_gradient_values(gradient_img, multiplier=1):
     """ Given the image gradient returns gradient_alpha_rgb_mul and one_minus_gradient_alpha.
@@ -168,3 +173,91 @@ def read_stream(data_queue, bag_path, topics, frame_limit):
         (_, data, _) = reader.read_next()
         s += 1
         data_queue.put((s, data))
+
+
+def load_model_from_dir(model_dir: str) -> Tuple[ModelMetadata, bytes]:
+    """
+    Load model metadata and model weights from a specified directory.
+
+    Args:
+        model_dir (str): The directory path where the model files are located.
+
+    Returns:
+        Tuple[deepracer_viz.ModelMetadata, bytes]: A tuple containing the model metadata and model weights.
+    """
+
+    model_metadata_path = os.path.join(model_dir, 'model_metadata.json')
+    model_weights_path = os.path.join(model_dir, 'model.pb')
+    if not os.path.exists(model_weights_path):
+        model_weights_path = os.path.join(model_dir, 'agent', 'model.pb')
+
+    if not os.path.exists(model_metadata_path):
+        raise FileNotFoundError(f"Model metadata file not found at {model_metadata_path}")
+    if not os.path.exists(model_weights_path):
+        raise FileNotFoundError(f"Model weights file not found at {model_weights_path}")
+
+    model_metadata = ModelMetadata.from_file(model_metadata_path)
+
+    with open(model_weights_path, 'rb') as f:
+        model_weights = f.read()
+
+    return model_metadata, model_weights
+
+def load_model_from_tar(tar_path: str) -> Tuple[ModelMetadata, bytes]:
+    """
+    Load model metadata and model weights from a tar.gz file.
+
+    Args:
+        tar_path (str): The file path to the tar.gz file containing the model files.
+
+    Returns:
+        Tuple[deepracer_viz.ModelMetadata, bytes]: A tuple containing the model metadata and model weights.
+    """
+    with tarfile.open(tar_path, 'r:gz') as tar:
+        model_metadata_file = None
+        model_weights_file = None
+
+        for member in tar.getmembers():
+            if 'model_metadata.json' in member.name:
+                model_metadata_file = member
+            elif 'model.pb' in member.name:
+                model_weights_file = member
+
+        if model_metadata_file is None:
+            raise FileNotFoundError("Model metadata file not found in the tar.gz archive.")
+        if model_weights_file is None:
+            raise FileNotFoundError("Model weights file not found in the tar.gz archive.")
+
+        with tar.extractfile(model_metadata_file) as json_file:
+            data = json.load(json_file)
+            if "version" in data:
+                simapp_version = data["version"]
+            else:
+                simapp_version = None
+
+            if "sensor" in data:
+                sensor = data["sensor"]
+            else:
+                sensor = ["observation"]
+                simapp_version = "1.0"
+
+            if "neural_network" in data:
+                network = data["neural_network"]
+            else:
+                network = "DEEP_CONVOLUTIONAL_NETWORK_SHALLOW"
+
+            if "action_space_type" in data:
+                action_space_type = data["action_space_type"]
+            else:
+                action_space_type = 'discrete'
+
+            if "action_space" in data:
+                action_space = data["action_space"]
+            else:
+                raise Exception("No action space in file")
+
+            model_metadata = ModelMetadata(sensor, network, simapp_version, action_space_type, action_space)
+
+        model_weights = tar.extractfile(model_weights_file).read()
+
+    return model_metadata, model_weights

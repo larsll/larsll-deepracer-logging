@@ -56,7 +56,7 @@ def signal_handler(sig, frame):
     exit(1)
 
 def process_worker(
-        data_queue: mp.Queue, result: Tuple, model_file: str, metadata: ModelMetadata, bag_info: dict,
+        data_queue: mp.Queue, result: Tuple, model_bytes: bytes, metadata: ModelMetadata, bag_info: dict,
         background: np.ndarray, action_names: List[str], flip_x: bool):
     """
     Worker function to process data frames using a machine learning model and Grad-CAM for visualization.
@@ -64,7 +64,7 @@ def process_worker(
     Args:
         data_queue (mp.Queue): Queue from which to read data frames to process.
         result_queue (mp.Queue): Queue to which to put processed results.
-        model_file (str): Path to the model file.
+        model_bytes (bytes): Model loaded into bytes.
         metadata (ModelMetadata): Metadata associated with the model.
         bag_info (dict): Dictionary containing information about the data bag.
         background (np.ndarray): Background image to use for visualization.
@@ -78,7 +78,7 @@ def process_worker(
     result_list, list_lock = result
     fig = create_plot(action_names, flip_x, HEIGHT, WIDTH, 72, transparent=(background is not None))
 
-    model = Model.from_file(model_pb_path=model_file, metadata=metadata, log_device_placement=False)
+    model = Model.from_bytes(model_bytes=model_bytes, metadata=metadata, log_device_placement=False)
     with model.session as _:
         cam = GradCam(model, model.get_conv_outputs())
 
@@ -398,7 +398,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--codec", help="The codec for the video writer", default="avc1")
     parser.add_argument("--bag_path", help="The path to the rosbag file", required=True)
-    parser.add_argument("--model_path", help="The path to the model directory", required=True)
+    parser.add_argument("--model", help="The path to the model directory or tar.gz-file", required=True)
     parser.add_argument("--frame_limit", help="Max number of frames to process", default=None)
     parser.add_argument("--describe", help="Describe the actions", default=False)
     parser.add_argument("--relative_labels",
@@ -407,32 +407,23 @@ def main():
 
     args = parser.parse_args()
 
-    model_path = args.model_path
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(f"Model directory '{model_path}' does not exist.")
+    if os.path.isdir(args.model):
+        metadata, model_bytes = utils.load_model_from_dir(args.model)
+        print("Using model directory: {}".format(args.model))
+    elif args.model.endswith('.tar.gz') or args.model.endswith('.tgz'):
+        metadata, model_bytes = utils.load_model_from_tar(args.model)
+        print("Using model archive: {}".format(args.model))
+    else:
+        raise ValueError("Model path must be a directory or a tar.gz/tgz file")
 
-    metadata_json = os.path.join(model_path, 'model_metadata.json')
-    model_pb = os.path.join(model_path, 'agent/model.pb')
-
-    if not os.path.exists(metadata_json):
-        raise FileNotFoundError(f"Model metadata file '{metadata_json}' does not exist.")
-
-    if not os.path.exists(model_pb):
-        raise FileNotFoundError(f"Model file '{model_pb}' does not exist.")
+    if metadata.action_space_type == 'continuous':
+        return NotImplementedError("Continuous action space not supported.")
 
     bag_path = args.bag_path.rstrip('/')
     if not os.path.exists(bag_path):
         raise FileNotFoundError(f"Bag directory '{bag_path}' does not exist.")
     else:
         print(f"Processing bag file: {bag_path}")
-
-    metadata = ModelMetadata.from_file(metadata_json)
-
-    if metadata.action_space_type == 'continuous':
-        return NotImplementedError("Continuous action space not supported.")
-
-    print("Using model: {}".format(model_path))
-    print("")
 
     if args.frame_limit:
         frame_limit = float(args.frame_limit)
@@ -501,7 +492,7 @@ def main():
         # Create worker processes
         for _ in range(worker_count):
             p = mp.Process(target=process_worker, args=(data_queue, (result_list, list_lock),
-                           model_pb, metadata, bag_info, background, action_names, flip_x))
+                           model_bytes, metadata, bag_info, background, action_names, flip_x))
             p.start()
             procs.append(p)
 

@@ -51,12 +51,18 @@ def main():
             
             model_name = '-'.join(file.split('-')[1:-2])
             model_path = os.path.join(models_directory, model_name)
+            if not os.path.isdir(model_path):
+                model_path = os.path.join(models_directory, model_name + '.tar.gz')
+                if os.path.isfile(model_path):
+                    pass
+                else:
+                    print(f"Model {model_name} does not exist in {models_directory}.")
 
             print(f"Running analysis for {bag_path}")
             cmd = [
                 'python3', os.path.join(script_dir, 'bag_analysis.py'),
                 '--bag_path', bag_path,
-                '--model_path', model_path,
+                '--model', model_path,
                 '--codec', args.codec
             ]
             if args.relative_labels:
