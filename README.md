@@ -1,4 +1,4 @@
-# LarsLL DeepRacer logging package
+# DeepRacer in-car Logging and Analysis
 
 ## Overview
 
