@@ -10,6 +10,25 @@ def usage():
     sys.exit(1)
 
 def main():
+    """
+    Main function to process bag files and generate videos.
+    This function parses command-line arguments to get the input directory, output directory,
+    models directory, codec, frame limit, and other options. It then processes each bag file
+    in the input directory, runs analysis using the specified model, and generates videos.
+    Finally, it combines all the generated videos into a single output.
+    Command-line arguments:
+        --input_dir (str): The directory containing the bag files (required).
+        --output_dir (str): The directory to save the videos (required).
+        --models_dir (str): The directory containing the model files (required).
+        --codec (str): The codec for the video writer (default: "avc1").
+        --frame_limit (int): Max number of frames to process (default: None).
+        --describe (bool): Describe the actions (default: False).
+        --relative_labels (bool): Make labels relative, not fixed to value in action space (default: False).
+        --background (bool): Add a background to the video (default: True).
+        --no-background (bool): Do not add a background to the video.
+        --pattern (str): Pattern to filter bag files (default: "*").
+    Exits with status 1 if any of the required directories do not exist.
+    """
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
 

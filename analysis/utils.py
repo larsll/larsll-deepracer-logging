@@ -124,6 +124,7 @@ def get_reader(bag_path: str, topics: List[str]) -> rosbag2_py.SequentialReader:
 
     return reader
 
+
 def print_baginfo(bag_info: dict):
     """
     Prints detailed information about a bag file.
@@ -136,6 +137,7 @@ def print_baginfo(bag_info: dict):
             - 'elapsed_time' (float): The elapsed time in seconds.
             - 'fps' (float): The average frames per second.
             - 'action_space_size' (int): The size of the action space.
+            - 'flip_x' (bool): Whether to flip the x-axis horizontally.
             - 'image_shape' (tuple): A tuple representing the shape of the input image (height, width, channels).
             - 'total_frames' (int): The total number of messages/frames.
     """
@@ -144,14 +146,16 @@ def print_baginfo(bag_info: dict):
     print("Loaded {} steps from {}.".format(bag_info['step_actual'], bag_info['step_diff']))
     print("Elapsed time: {:.2f} seconds".format(bag_info['elapsed_time']))
     print("Average FPS: {:.1f}".format(bag_info['fps']))
-    print("Action Space: {} actions".format(bag_info['action_space_size']))
+    print("Action Space: {} actions, first steering angle: {}, flip x-axis: {}".format(
+        bag_info['action_space_size'], bag_info['action_space'][0]['steering_angle'], bag_info['flip_x']))
     print("Input image: {}x{}, {} channels.".format(
         bag_info['image_shape'][1],
         bag_info['image_shape'][0],
         bag_info['image_shape'][2]))
     print("Total messages: {}, expected duration: {:.1f}".format(
         bag_info['total_frames'], bag_info['total_frames']/bag_info['fps']))
-    
+
+
 
 def read_stream(data_queue, bag_path, topics, frame_limit):
     """

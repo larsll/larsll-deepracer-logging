@@ -124,8 +124,6 @@ def combine_videos(video_files: list, output_file: str, background_path: str, fo
             print(f"Skipping {video_file} (duration: {duration:.2f} seconds)")
             cap.release()
             continue
-        else:
-            print(f"Adding video: {video_file}")
 
         # Create and write divider frame
         divider_frame = create_divider_frame(width, height, prefix, date_time, background_path, font_path_bd, font_path_rg)

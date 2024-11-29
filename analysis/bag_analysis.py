@@ -57,7 +57,7 @@ def signal_handler(sig, frame):
 
 def process_worker(
         data_queue: mp.Queue, result: Tuple, model_bytes: bytes, metadata: ModelMetadata, bag_info: dict,
-        background: np.ndarray, action_names: List[str], flip_x: bool):
+        background: np.ndarray, action_names: List[str]):
     """
     Worker function to process data frames using a machine learning model and Grad-CAM for visualization.
 
@@ -69,13 +69,13 @@ def process_worker(
         bag_info (dict): Dictionary containing information about the data bag.
         background (np.ndarray): Background image to use for visualization.
         action_names (List[str]): List of action names for labeling.
-        flip_x (bool): Whether to flip the image horizontally.
 
     Raises:
         Exception: If an error occurs during frame processing.
     """
 
     result_list, list_lock = result
+    flip_x = bag_info['flip_x']
     fig = create_plot(action_names, flip_x, HEIGHT, WIDTH, 72, transparent=(background is not None))
 
     model = Model.from_bytes(model_bytes=model_bytes, metadata=metadata, log_device_placement=False)
@@ -89,7 +89,7 @@ def process_worker(
                     break
 
                 index, data = task_data
-                step, img, grad_img = process_frame(data, start_time=bag_info['start_time'], seq=index, cam=cam)
+                step, img, grad_img = process_input_frame(data, start_time=bag_info['start_time'], seq=index, cam=cam)
                 encimg = create_img(fig, step, bag_info, img, grad_img, action_names, flip_x, background)
 
                 with list_lock:
@@ -248,7 +248,7 @@ def create_img(
     return encimg
 
 
-def process_frame(data: bytes, start_time: float, seq: int, cam: GradCam) -> Tuple[Dict, np.ndarray, np.ndarray]:
+def process_input_frame(data: bytes, start_time: float, seq: int, cam: GradCam) -> Tuple[Dict, np.ndarray, np.ndarray]:
     """
     Process data from a bag file.
 
@@ -308,12 +308,13 @@ def process_frame(data: bytes, start_time: float, seq: int, cam: GradCam) -> Tup
         print(e)
 
 
-def analyze_bag(bag_path: str) -> Dict:
+def analyze_bag(bag_path: str, metadata: ModelMetadata) -> Dict:
     """
     Analyzes a bag file and returns information about the bag.
 
     Args:
         bag_path (str): The path to the bag file.
+        metadata (ModelMetadata): Metadata of the model.
 
     Returns:
         Dict: A dictionary containing information about the bag file, including start time, FPS, total frames, step difference, elapsed time, action space size, and image shape.
@@ -365,8 +366,153 @@ def analyze_bag(bag_path: str) -> Dict:
     bag_info['elapsed_time'] = df['timestamp'].max()
     bag_info['action_space_size'] = len(msg.results)
     bag_info['image_shape'] = tmp_img.shape
+    bag_info['action_space'] = metadata.action_space.action_space
+    bag_info['flip_x'] = metadata.action_space.action_space[0]['steering_angle'] < 0
+
 
     return bag_info
+
+def process_file(bag_path: str, model_bytes: bytes, metadata: ModelMetadata, args: argparse.Namespace, frame_limit: int) -> Dict:
+    """
+    Processes a bag file and generates a video with the processed frames.
+
+    Args:
+        bag_path (str): Path to the bag file.
+        model_bytes (bytes): Model data in bytes.
+        metadata (ModelMetadata): Metadata of the model.
+        args (argparse.Namespace): Command-line arguments.
+        frame_limit (int): Maximum number of frames to process.
+
+    Returns:
+        Dict: A dictionary containing steps data, bag information, action names, and the output file path.
+    """
+    
+    # Prepare action names
+    action_names = []
+    action_space = metadata.action_space.action_space
+    max_steering_angle = max(float(action['steering_angle']) for action in action_space)
+    max_speed = max(float(action['speed']) for action in action_space)
+
+    for action in action_space:
+        if args.relative_labels:
+            if float(action['steering_angle']) == 0.0:
+                steering_label = "C"
+            else:
+                steering_label = "L" if float(action['steering_angle']) > 0 else "R"
+            steering_value = abs(float(action['steering_angle']) * 100 / max_steering_angle)
+            speed_value = float(action["speed"]) * 100 / max_speed
+            action_names.append(f"{steering_label}{steering_value:.0f}% x {speed_value:.0f}%")
+        else:
+            action_names.append(str(action['steering_angle']) + u'\N{DEGREE SIGN}' + " "+"%.1f" % action["speed"])
+
+    bag_info = analyze_bag(bag_path, metadata)
+    utils.print_baginfo(bag_info)
+
+    # flip_x = action_space[0]['steering_angle'] < 0
+
+    # Key data points
+    worker_count = int((psutil.cpu_count(logical=False))*3/4)
+    frame_limit = int(min(bag_info['total_frames'], frame_limit))
+
+    print("")
+    print("Analysed file. Starting processing of {} frames with {} workers.".format(frame_limit, worker_count))
+
+    if args.background:
+        background_path = os.path.join(
+            SCRIPT_DIR, "resources",
+            "AWS-Deepracer_Background_Machine-Learning.928f7bc20a014c7c7823e819ce4c2a84af17597c.jpg")
+        background = utils.load_background_image(background_path, WIDTH, HEIGHT)
+    else:
+        background = None
+
+    # Create video writer
+    CODEC = args.codec
+    output_file = "{}.mp4".format(bag_path)
+    writer = cv2.VideoWriter(output_file, cv2.VideoWriter_fourcc(
+        *CODEC), int(round(bag_info['fps'], 0)), (WIDTH, HEIGHT))
+
+    steps_data = {'steps': []}
+
+    try:
+
+        # Create queues for data and results
+        data_queue = mp.Queue()
+        manager = mp.Manager()
+        result_list = manager.list()
+        list_lock = manager.Lock()
+
+        # Use a separate process to read from the stream
+        stream_reader = mp.Process(target=utils.read_stream, args=(
+            data_queue, bag_path, ['/inference_pkg/rl_results'], frame_limit))
+        procs.append(stream_reader)
+        stream_reader.start()
+
+        # Create worker processes
+        for _ in range(worker_count):
+            p = mp.Process(target=process_worker, args=(data_queue, (result_list, list_lock),
+                           model_bytes, metadata, bag_info, background, action_names))
+            p.start()
+            procs.append(p)
+
+        pbar_proc = tqdm(total=frame_limit, desc="Processing messages", unit="msgs", smoothing=0.1, leave=True)
+        pbar_write = tqdm(total=min(bag_info['total_frames'], frame_limit),
+                    desc="Writing image frames", unit="frames", smoothing=0.1, leave=True)
+
+        # Read results from the result queue, stop once we have received expected number of frames
+        # Priority queue to store results
+        pq = []
+        expected_index = 1
+        received = 0
+
+        while True:
+            try:
+                while len(result_list) > 0:
+                    with list_lock:
+                        result = result_list.pop(0)
+
+                    heapq.heappush(pq, result)
+                    received += 1
+                    pbar_proc.update(1)
+
+                    if received == frame_limit:
+                        pbar_proc.refresh()
+
+                # Process results in order
+                if pq and pq[0][0] == expected_index:
+                    _, step, encimg = heapq.heappop(pq)
+                    steps_data['steps'].append(step)
+                    writer.write(cv2.imdecode(np.frombuffer(encimg, dtype=np.uint8), cv2.IMREAD_COLOR))
+                    pbar_write.update(1)
+                    expected_index += 1
+
+                if len(steps_data['steps']) == frame_limit:
+                    pbar_write.refresh()                        
+                    pbar_proc.close()                   
+                    pbar_write.close()
+                    break
+
+            except Exception as e:
+                print(f"Error writing frame: {e}")
+                raise
+
+        # Wait for the stream reader to finish, then send termination
+        # to the worker processes.
+        stream_reader.join()
+        procs.pop(0)
+        for _ in range(worker_count):
+            data_queue.put(None)
+
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        raise
+
+    finally:
+        writer.release()
+        for p in procs:
+            p.terminate()
+            p.join()
+
+    return steps_data, bag_info, action_names, output_file
 
 
 def main():
@@ -430,130 +576,10 @@ def main():
     else:
         frame_limit = float("inf")
 
-    # Prepare action names
-    action_names = []
-    action_space = metadata.action_space.action_space
-    max_steering_angle = max(float(action['steering_angle']) for action in action_space)
-    max_speed = max(float(action['speed']) for action in action_space)
+    ### Main Processing Step ###
+    steps_data, bag_info, action_names, output_file = process_file(bag_path, model_bytes, metadata, args, frame_limit)
 
-    for action in action_space:
-        if args.relative_labels:
-            if float(action['steering_angle']) == 0.0:
-                steering_label = "C"
-            else:
-                steering_label = "L" if float(action['steering_angle']) > 0 else "R"
-            steering_value = abs(float(action['steering_angle']) * 100 / max_steering_angle)
-            speed_value = float(action["speed"]) * 100 / max_speed
-            action_names.append(f"{steering_label}{steering_value:.0f}% x {speed_value:.0f}%")
-        else:
-            action_names.append(str(action['steering_angle']) + u'\N{DEGREE SIGN}' + " "+"%.1f" % action["speed"])
-    bag_info = analyze_bag(bag_path)
-    utils.print_baginfo(bag_info)
-    flip_x = action_space[0]['steering_angle'] < 0
-    print("First steering angle: {} Flip X-axis: {}".format(action_space[0]['steering_angle'], flip_x))
-
-    # Key data points
-    worker_count = int((psutil.cpu_count(logical=False))*3/4)
-    frame_limit = int(min(bag_info['total_frames'], frame_limit))
-
-    print("")
-    print("Analysed file. Starting processing of {} frames with {} workers.".format(frame_limit, worker_count))
-
-    if args.background:
-        background_path = os.path.join(
-            SCRIPT_DIR, "resources",
-            "AWS-Deepracer_Background_Machine-Learning.928f7bc20a014c7c7823e819ce4c2a84af17597c.jpg")
-        background = utils.load_background_image(background_path, WIDTH, HEIGHT)
-    else:
-        background = None
-
-    # Create video writer
-    CODEC = args.codec
-    output_file = "{}.mp4".format(bag_path)
-    writer = cv2.VideoWriter(output_file, cv2.VideoWriter_fourcc(
-        *CODEC), int(round(bag_info['fps'], 0)), (WIDTH, HEIGHT))
-
-    steps_data = {'steps': []}
-
-    try:
-
-        # Create queues for data and results
-        data_queue = mp.Queue()
-        manager = mp.Manager()
-        result_list = manager.list()
-        list_lock = manager.Lock()
-
-        # Use a separate process to read from the stream
-        stream_reader = mp.Process(target=utils.read_stream, args=(
-            data_queue, bag_path, ['/inference_pkg/rl_results'], frame_limit))
-        procs.append(stream_reader)
-        stream_reader.start()
-
-        # Create worker processes
-        for _ in range(worker_count):
-            p = mp.Process(target=process_worker, args=(data_queue, (result_list, list_lock),
-                           model_bytes, metadata, bag_info, background, action_names, flip_x))
-            p.start()
-            procs.append(p)
-
-        pbar_proc = tqdm(total=frame_limit, desc="Processing messages", unit="msgs", smoothing=0.1, leave=True)
-        pbar_write = tqdm(total=min(bag_info['total_frames'], frame_limit),
-                    desc="Writing image frames", unit="frames", smoothing=0.1, leave=True)
-
-        # Read results from the result queue, stop once we have received expected number of frames
-        # Priority queue to store results
-        pq = []
-        expected_index = 1
-        received = 0
-
-        while True:
-            try:
-                while len(result_list) > 0:
-                    with list_lock:
-                        result = result_list.pop(0)
-
-                    heapq.heappush(pq, result)
-                    received += 1
-                    pbar_proc.update(1)
-
-                    if received == frame_limit:
-                        pbar_proc.refresh()
-
-                # Process results in order
-                if pq and pq[0][0] == expected_index:
-                    _, step, encimg = heapq.heappop(pq)
-                    steps_data['steps'].append(step)
-                    writer.write(cv2.imdecode(np.frombuffer(encimg, dtype=np.uint8), cv2.IMREAD_COLOR))
-                    pbar_write.update(1)
-                    expected_index += 1
-
-                if len(steps_data['steps']) == frame_limit:
-                    pbar_write.refresh()                        
-                    pbar_proc.close()                   
-                    pbar_write.close()
-                    break
-
-            except Exception as e:
-                print(f"Error writing frame: {e}")
-                raise
-
-        # Wait for the stream reader to finish, then send termination
-        # to the worker processes.
-        stream_reader.join()
-        procs.pop(0)
-        for _ in range(worker_count):
-            data_queue.put(None)
-
-    except Exception as e:
-        print(f"Unexpected error: {e}")
-        raise
-
-    finally:
-        writer.release()
-        for p in procs:
-            p.terminate()
-            p.join()
-
+    # Print analysis
     df = pd.json_normalize(steps_data['steps'])
     del steps_data
 
