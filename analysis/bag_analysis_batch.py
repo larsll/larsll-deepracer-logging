@@ -27,6 +27,7 @@ def main():
         --background (bool): Add a background to the video (default: True).
         --no-background (bool): Do not add a background to the video.
         --pattern (str): Pattern to filter bag files (default: "*").
+        --skip_duration (float): Skip video files with duration less than the specified value (default: 20.0).
     Exits with status 1 if any of the required directories do not exist.
     """
 
@@ -40,6 +41,7 @@ def main():
     parser.add_argument("--frame_limit", help="Max number of frames to process", default=None)
     parser.add_argument("--describe", help="Describe the actions", action="store_true")
     parser.add_argument("--relative_labels", help="Make labels relative, not fixed to value in action space", default=False, action="store_true")
+    parser.add_argument("--skip_duration", help="Skip video files with duration less than the specified value", type=float, default=20.0)
     parser.add_argument("--background", dest="background", help="Add a background to the video", action="store_true")
     parser.add_argument("--no-background", dest="background", help="Do not add a background to the video", action="store_false")
     parser.set_defaults(background=True)
@@ -104,7 +106,8 @@ def main():
         '--input_dir', input_dir,
         '--output_dir', output_dir,
         '--codec', args.codec,
-        '--pattern', args.pattern
+        '--pattern', args.pattern,
+        '--skip_duration', str(args.skip_duration)
     ]
     subprocess.run(cmd)
 

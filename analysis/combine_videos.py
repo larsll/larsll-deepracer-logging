@@ -83,7 +83,7 @@ def create_divider_frame(width: int, height: int, prefix: str, date_time: str, b
 
     return background
 
-def combine_videos(video_files: list, output_file: str, background_path: str, font_path_bd: str, font_path_rg: str, codec: str = "avc1") -> None:
+def combine_videos(video_files: list, output_file: str, background_path: str, font_path_bd: str, font_path_rg: str, codec: str = "avc1", skip_duration: float = 20.0) -> None:
     """
     Combine multiple video files into a single video file.
 
@@ -94,6 +94,7 @@ def combine_videos(video_files: list, output_file: str, background_path: str, fo
         font_path_bd (str): The path to the bold font.
         font_path_rg (str): The path to the regular font.
         codec (str): The codec for the video writer.
+        skip_duration (float): Skip video files with duration less than the specified value.
     """
     if not video_files:
         print("No video files to combine.")
@@ -120,7 +121,7 @@ def combine_videos(video_files: list, output_file: str, background_path: str, fo
 
         cap = cv2.VideoCapture(video_file)
         duration = cap.get(cv2.CAP_PROP_FRAME_COUNT) / fps
-        if duration < 20:
+        if duration < skip_duration:
             print(f"Skipping {video_file} (duration: {duration:.2f} seconds)")
             cap.release()
             continue
@@ -150,6 +151,7 @@ def main():
     parser.add_argument("--output_dir", help="The directory to save the combined videos", required=True)
     parser.add_argument("--background", help="The path to the background image for dividers", default=None)
     parser.add_argument("--pattern", help="Pattern to filter video files", default="*.mp4")
+    parser.add_argument("--skip_duration", help="Skip video files with duration less than the specified value", type=float, default=20.0)
     args = parser.parse_args()
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -163,7 +165,7 @@ def main():
     video_files_dict = get_video_files(args.input_dir, args.pattern)
     for (prefix, date), video_files in video_files_dict.items():
         output_file = os.path.join(args.output_dir, f"{prefix}-{date}.mp4")
-        combine_videos(video_files, output_file, args.background, font_path_bd, font_path_rg, codec=args.codec)
+        combine_videos(video_files, output_file, args.background, font_path_bd, font_path_rg, codec=args.codec, skip_duration=args.skip_duration)
 
 if __name__ == "__main__":
     main()
