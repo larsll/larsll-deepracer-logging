@@ -28,6 +28,7 @@ def main():
         --no-background (bool): Do not add a background to the video.
         --pattern (str): Pattern to filter bag files (default: "*").
         --skip_duration (float): Skip video files with duration less than the specified value (default: 20.0).
+        --group_slice (str): Slice to allow videos to be grouped (default: ":-2").
     Exits with status 1 if any of the required directories do not exist.
     """
 
@@ -46,6 +47,7 @@ def main():
     parser.add_argument("--no-background", dest="background", help="Do not add a background to the video", action="store_false")
     parser.set_defaults(background=True)
     parser.add_argument("--pattern", help="Pattern to filter bag files", default="*")
+    parser.add_argument("--group_slice", help="Slice to allow videos to be grouped", default=":-2")
 
     args = parser.parse_args()
 
@@ -107,7 +109,8 @@ def main():
         '--output_dir', output_dir,
         '--codec', args.codec,
         '--pattern', args.pattern,
-        '--skip_duration', str(args.skip_duration)
+        '--skip_duration', str(args.skip_duration),
+        '--group_slice', args.group_slice
     ]
     subprocess.run(cmd)
 

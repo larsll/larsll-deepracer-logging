@@ -8,13 +8,14 @@ import argparse
 import fnmatch
 from tqdm import tqdm
 
-def get_video_files(directory: str, pattern: str) -> dict:
+def get_video_files(directory: str, pattern: str, group_slice: str) -> dict:
     """
     Get a dictionary of video files grouped by prefix and date, filtered by a pattern.
 
     Args:
         directory (str): The directory containing the video files.
         pattern (str): The pattern to filter video files.
+        group_slice (str): The slice to allow videos to be grouped.
 
     Returns:
         dict: A dictionary where keys are tuples of (prefix, date) and values are lists of video file paths.
@@ -23,7 +24,8 @@ def get_video_files(directory: str, pattern: str) -> dict:
     for file in os.listdir(directory):
         if file.endswith(".mp4") and fnmatch.fnmatch(file, pattern):
             parts = file.split('-')
-            prefix = '-'.join(parts[:-2])
+            prefix_start, prefix_end = (int(x) if x else None for x in group_slice.split(':'))
+            prefix = '-'.join(parts[prefix_start:prefix_end])
             date = parts[-2]
             key = (prefix, date)
             if key not in video_files:
@@ -152,6 +154,7 @@ def main():
     parser.add_argument("--background", help="The path to the background image for dividers", default=None)
     parser.add_argument("--pattern", help="Pattern to filter video files", default="*.mp4")
     parser.add_argument("--skip_duration", help="Skip video files with duration less than the specified value", type=float, default=20.0)
+    parser.add_argument("--group_slice", help="Slice to allow videos to be grouped", default=":-2")
     args = parser.parse_args()
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -162,7 +165,7 @@ def main():
     font_path_bd = os.path.join(script_dir, "resources", "Amazon_Ember_Bd.ttf")
     font_path_rg = os.path.join(script_dir, "resources", "Amazon_Ember_Rg.ttf")
 
-    video_files_dict = get_video_files(args.input_dir, args.pattern)
+    video_files_dict = get_video_files(args.input_dir, args.pattern, args.group_slice)
     for (prefix, date), video_files in video_files_dict.items():
         output_file = os.path.join(args.output_dir, f"{prefix}-{date}.mp4")
         combine_videos(video_files, output_file, args.background, font_path_bd, font_path_rg, codec=args.codec, skip_duration=args.skip_duration)
