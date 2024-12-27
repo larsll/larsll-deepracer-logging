@@ -7,8 +7,13 @@ from PIL import Image, ImageDraw, ImageFont
 import argparse
 import fnmatch
 from tqdm import tqdm
+import random
+import string
 
-def get_video_files(directory: str, pattern: str, group_slice: str) -> dict:
+
+def get_video_files(
+    directory: str, pattern: str, group_slice: str, delimiter: str
+) -> dict:
     """
     Get a dictionary of video files grouped by prefix and date, filtered by a pattern.
 
@@ -16,6 +21,7 @@ def get_video_files(directory: str, pattern: str, group_slice: str) -> dict:
         directory (str): The directory containing the video files.
         pattern (str): The pattern to filter video files.
         group_slice (str): The slice to allow videos to be grouped.
+        delimiter (str): The delimiter to use for the output file name.
 
     Returns:
         dict: A dictionary where keys are tuples of (prefix, date) and values are lists of video file paths.
@@ -23,21 +29,32 @@ def get_video_files(directory: str, pattern: str, group_slice: str) -> dict:
     video_files = {}
     for file in os.listdir(directory):
         if file.endswith(".mp4") and fnmatch.fnmatch(file, pattern):
-            parts = file.split('-')
-            prefix_start, prefix_end = (int(x) if x else None for x in group_slice.split(':'))
-            prefix = '-'.join(parts[prefix_start:prefix_end])
+            parts = file.split("-")
+            prefix_start, prefix_end = (
+                int(x) if x else None for x in group_slice.split(":")
+            )
+            prefix = delimiter.join(parts[prefix_start:prefix_end])
             date = parts[-2]
             key = (prefix, date)
             if key not in video_files:
                 video_files[key] = []
             video_files[key].append(os.path.join(directory, file))
-    
+
     for key in video_files:
         video_files[key].sort()
 
     return video_files
 
-def create_divider_frame(width: int, height: int, prefix: str, date_time: str, background_path: str, font_path_bd: str, font_path_rg: str) -> np.ndarray:
+
+def create_divider_frame(
+    width: int,
+    height: int,
+    prefix: str,
+    date_time: str,
+    background_path: str,
+    font_path_bd: str,
+    font_path_rg: str,
+) -> np.ndarray:
     """
     Create a divider frame with the specified text and background.
 
@@ -77,15 +94,32 @@ def create_divider_frame(width: int, height: int, prefix: str, date_time: str, b
     text_y_date_time = (height // 2) + 20
 
     # Put text on the background
-    draw.text((text_x_prefix, text_y_prefix), prefix, font=font_bd, fill=(255, 255, 255))
-    draw.text((text_x_date_time, text_y_date_time), date_time_formatted, font=font_rg, fill=(255, 255, 255))
+    draw.text(
+        (text_x_prefix, text_y_prefix), prefix, font=font_bd, fill=(255, 255, 255)
+    )
+    draw.text(
+        (text_x_date_time, text_y_date_time),
+        date_time_formatted,
+        font=font_rg,
+        fill=(255, 255, 255),
+    )
 
     # Convert the PIL image back to a NumPy array
     background = cv2.cvtColor(np.array(background_pil), cv2.COLOR_RGB2BGR)
 
     return background
 
-def combine_videos(video_files: list, output_file: str, background_path: str, font_path_bd: str, font_path_rg: str, codec: str = "avc1", skip_duration: float = 20.0) -> None:
+
+def combine_videos(
+    video_files: list,
+    output_file: str,
+    background_path: str,
+    font_path_bd: str,
+    font_path_rg: str,
+    codec: str = "avc1",
+    skip_duration: float = 20.0,
+    update_frequency: float = 0.1,
+) -> None:
     """
     Combine multiple video files into a single video file.
 
@@ -97,6 +131,7 @@ def combine_videos(video_files: list, output_file: str, background_path: str, fo
         font_path_rg (str): The path to the regular font.
         codec (str): The codec for the video writer.
         skip_duration (float): Skip video files with duration less than the specified value.
+        update_frequency (float): Update frequency for the progress bar.
     """
     if not video_files:
         print("No video files to combine.")
@@ -117,9 +152,9 @@ def combine_videos(video_files: list, output_file: str, background_path: str, fo
 
     for video_file in video_files:
         # Extract prefix and date_time from the filename
-        parts = os.path.basename(video_file).split('-')
-        prefix = '-'.join(parts[:-2])
-        date_time = '-'.join(parts[-2:]).replace('.mp4', '')
+        parts = os.path.basename(video_file).split("-")
+        prefix = "-".join(parts[:-2])
+        date_time = "-".join(parts[-2:]).replace(".mp4", "")
 
         cap = cv2.VideoCapture(video_file)
         duration = cap.get(cv2.CAP_PROP_FRAME_COUNT) / fps
@@ -129,12 +164,25 @@ def combine_videos(video_files: list, output_file: str, background_path: str, fo
             continue
 
         # Create and write divider frame
-        divider_frame = create_divider_frame(width, height, prefix, date_time, background_path, font_path_bd, font_path_rg)
+        divider_frame = create_divider_frame(
+            width,
+            height,
+            prefix,
+            date_time,
+            background_path,
+            font_path_bd,
+            font_path_rg,
+        )
         for _ in range(int(fps * 1.5)):  # Display the divider for 1.5 second
             out.write(divider_frame)
 
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        with tqdm(total=total_frames, desc=f"Processing {os.path.basename(video_file)}", unit="frames") as pbar:
+        with tqdm(
+            total=total_frames,
+            desc=f"Processing {os.path.basename(video_file)}",
+            unit="frames",
+            mininterval=update_frequency,
+        ) as pbar:
             while cap.isOpened():
                 ret, frame = cap.read()
                 if not ret:
@@ -146,29 +194,104 @@ def combine_videos(video_files: list, output_file: str, background_path: str, fo
     out.release()
     print(f"Finished video file: {output_file}")
 
+
 def main():
-    parser = argparse.ArgumentParser(description="Combine videos with the same prefix created on the same day.")
-    parser.add_argument("--codec", help="The codec for the video writer", default="avc1")
-    parser.add_argument("--input_dir", help="The directory containing the video files", required=True)
-    parser.add_argument("--output_dir", help="The directory to save the combined videos", required=True)
-    parser.add_argument("--background", help="The path to the background image for dividers", default=None)
-    parser.add_argument("--pattern", help="Pattern to filter video files", default="*.mp4")
-    parser.add_argument("--skip_duration", help="Skip video files with duration less than the specified value", type=float, default=20.0)
-    parser.add_argument("--group_slice", help="Slice to allow videos to be grouped", default=":-2")
+    parser = argparse.ArgumentParser(
+        description="Combine videos with the same prefix created on the same day."
+    )
+    parser.add_argument(
+        "--codec", help="The codec for the video writer", default="avc1"
+    )
+    parser.add_argument(
+        "--input_dir", help="The directory containing the video files", required=True
+    )
+    parser.add_argument(
+        "--output_dir", help="The directory to save the combined videos", required=True
+    )
+    parser.add_argument(
+        "--background",
+        help="The path to the background image for dividers",
+        default=None,
+    )
+    parser.add_argument(
+        "--pattern", help="Pattern to filter video files", default="*.mp4"
+    )
+    parser.add_argument(
+        "--skip_duration",
+        help="Skip video files with duration less than the specified value",
+        type=float,
+        default=20.0,
+    )
+    parser.add_argument(
+        "--group_slice", help="Slice to allow videos to be grouped", default=":-2"
+    )
+    parser.add_argument(
+        "--update_frequency",
+        help="Update frequency for the progress bar",
+        default=0.1,
+        type=float,
+    )
+    parser.add_argument(
+        "--car_name",
+        help="The name of the car to display on the video",
+        default=None,
+        type=str,
+    )
+    parser.add_argument(
+        "--unique",
+        help="Add a unique suffix to the file namee",
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--delimiter",
+        help="The delimiter to use for the output file name",
+        default="-",
+        type=str,
+    )
+
     args = parser.parse_args()
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
     if args.background is None:
-        args.background = os.path.join(script_dir, "resources", "AWS-Deepracer_Background_Machine-Learning.928f7bc20a014c7c7823e819ce4c2a84af17597c.jpg")
+        args.background = os.path.join(
+            script_dir,
+            "resources",
+            "AWS-Deepracer_Background_Machine-Learning.928f7bc20a014c7c7823e819ce4c2a84af17597c.jpg",
+        )
 
     font_path_bd = os.path.join(script_dir, "resources", "Amazon_Ember_Bd.ttf")
     font_path_rg = os.path.join(script_dir, "resources", "Amazon_Ember_Rg.ttf")
 
-    video_files_dict = get_video_files(args.input_dir, args.pattern, args.group_slice)
+    video_files_dict = get_video_files(
+        args.input_dir, args.pattern, args.group_slice, "-"
+    )
+    print("Video files grouped by prefix and date:", video_files_dict)
     for (prefix, date), video_files in video_files_dict.items():
-        output_file = os.path.join(args.output_dir, f"{prefix}-{date}.mp4")
-        combine_videos(video_files, output_file, args.background, font_path_bd, font_path_rg, codec=args.codec, skip_duration=args.skip_duration)
+
+        name_components = [prefix]
+        if args.car_name:
+            name_components.append(args.car_name.strip())
+        name_components.append(date)
+        if args.unique:
+            unique_suffix = "".join(random.choices(string.ascii_letters, k=4))
+            name_components.append(unique_suffix)
+        output_file = os.path.join(
+            args.output_dir, args.delimiter.join(name_components) + ".mp4"
+        )
+
+        combine_videos(
+            video_files,
+            output_file,
+            args.background,
+            font_path_bd,
+            font_path_rg,
+            codec=args.codec,
+            skip_duration=args.skip_duration,
+            update_frequency=args.update_frequency,
+        )
+
 
 if __name__ == "__main__":
     main()
