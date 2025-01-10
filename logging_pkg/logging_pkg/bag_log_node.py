@@ -294,6 +294,7 @@ class BagLogNode(Node):
         if notification_msg.file_name == constants.LOGS_SOURCE_LEAF_DIRECTORY and \
            notification_msg.callback_name == constants.LOGS_DIR_CB:
             self._output_path = os.path.join(notification_msg.path, notification_msg.file_name)
+            self.set_parameters([rclpy.parameter.Parameter('output_path', rclpy.Parameter.Type.STRING, self._output_path)])
             self.get_logger().info(f"New output path: {self._output_path}")
 
         if self._logging_mode == LoggingMode.USBOnly and self._state == NodeState.Starting:
