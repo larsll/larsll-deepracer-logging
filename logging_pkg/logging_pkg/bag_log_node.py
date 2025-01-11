@@ -171,8 +171,8 @@ class BagLogNode(Node):
         self._change_gc = self.create_guard_condition(callback=self._change_cb,
                                                       callback_group=self._main_cbg)
 
-        self.get_logger().info('Node started. Mode {}. Monitor \'{}\'. Additionally logging {}.'
-                               .format(self._logging_mode.name, self._monitor_topic, str(self._topics_to_scan)))
+        self.get_logger().info('Node started. Mode \'{}\'. Provider \'{}\'. Monitor \'{}\'. Additionally logging {}.'
+                               .format(self._logging_mode.name, self._logging_provider, self._monitor_topic, str(self._topics_to_scan)))
 
         # Create a subscription to the file name topic
         self._file_name_sub = self.create_subscription(String, self._file_name_topic,
