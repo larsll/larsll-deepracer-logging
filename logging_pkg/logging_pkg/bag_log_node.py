@@ -75,6 +75,7 @@ class BagLogNode(Node):
         - file_name_topic (str): The topic to monitor for file names. Default is '/inference_pkg/model_name'.
         - monitor_topic_timeout (int): The timeout duration for the monitor topic in seconds. Default is 1.
         - log_topics (list of str): The list of topics to log. Default is ['/ctrl_pkg/servo_msg'].
+        - logging_provier (str): The logging provider to use. Default is 'sqlite3'.
 
         Sets:
         - self._output_path (str): The resolved output path for logs.
@@ -86,6 +87,7 @@ class BagLogNode(Node):
         - self._monitor_timeout_duration (Duration): The duration object for monitor topic timeout.
         - self._monitor_last_received (Time): The timestamp of the last received monitor message.
         - self._log_topics (list of str): The resolved list of topics to log.
+        - self._logging_provider (str): The resolved logging provider.
         - self._topics_to_scan (list of str): The list of topics to scan, excluding the monitor topic.
         - self._bag_name (str): The default bag name defined in constants.
         """
@@ -127,6 +129,11 @@ class BagLogNode(Node):
             'log_topics', ['/ctrl_pkg/servo_msg'],
             ParameterDescriptor(type=ParameterType.PARAMETER_STRING_ARRAY))
         self._log_topics = self.get_parameter('log_topics').value
+
+        self.declare_parameter(
+            'logging_provier', 'sqlite3',
+            ParameterDescriptor(type=ParameterType.PARAMETER_STRING))
+        self._logging_provider = self.get_parameter('logging_provier').value
 
         self._topics_to_scan += self._log_topics
         if self._topics_to_scan.count(self._monitor_topic) > 0:
@@ -512,7 +519,7 @@ class BagLogNode(Node):
                 input_serialization_format=serialization_format,
                 output_serialization_format=serialization_format)
 
-            storage_options = rosbag2_py.StorageOptions(uri=bag_path, storage_id='sqlite3')
+            storage_options = rosbag2_py.StorageOptions(uri=bag_path, storage_id=self._logging_provider)
 
             self._bag_writer = rosbag2_py.SequentialWriter()
             self._bag_writer.open(storage_options, converter_options)
