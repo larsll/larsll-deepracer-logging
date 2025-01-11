@@ -131,9 +131,9 @@ class BagLogNode(Node):
         self._log_topics = self.get_parameter('log_topics').value
 
         self.declare_parameter(
-            'logging_provier', 'sqlite3',
+            'logging_provider', 'sqlite3',
             ParameterDescriptor(type=ParameterType.PARAMETER_STRING))
-        self._logging_provider = self.get_parameter('logging_provier').value
+        self._logging_provider = self.get_parameter('logging_provider').value
 
         self._topics_to_scan += self._log_topics
         if self._topics_to_scan.count(self._monitor_topic) > 0:
