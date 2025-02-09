@@ -14,12 +14,13 @@ from rclpy.node import Node, Subscription, TopicEndpointInfo, QoSProfile
 from rclpy.qos import HistoryPolicy
 from rclpy.time import Duration
 from rclpy.executors import MultiThreadedExecutor
-from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallbackGroup
 
 import rosbag2_py
 from rcl_interfaces.msg import ParameterDescriptor, ParameterType
 
 from std_msgs.msg import String
+from std_srvs.srv import Trigger
 
 from deepracer_interfaces_pkg.srv import USBFileSystemSubscribeSrv, USBMountPointManagerSrv
 from deepracer_interfaces_pkg.msg import USBFileSystemNotificationMsg
@@ -55,6 +56,8 @@ class BagLogNode(Node):
     _topics_to_scan: List[str] = []
     _bag_lock = Lock()
     _bag_writer = None
+
+    _pause_until = time.time()
 
     _usb_path = False
 
@@ -160,6 +163,7 @@ class BagLogNode(Node):
 
         # Subscription to monitor topic.
         self._main_cbg = ReentrantCallbackGroup()
+        self._st_cbg = MutuallyExclusiveCallbackGroup()
 
         # Start the scan
         if self._logging_mode == LoggingMode.Always:
@@ -169,7 +173,7 @@ class BagLogNode(Node):
 
         # Monitor changes
         self._change_gc = self.create_guard_condition(callback=self._change_cb,
-                                                      callback_group=self._main_cbg)
+                                                      callback_group=self._st_cbg)
 
         self.get_logger().info('Node started. Mode \'{}\'. Provider \'{}\'. Monitor \'{}\'. Additionally logging {}.'
                                .format(self._logging_mode.name, self._logging_provider, self._monitor_topic, str(self._topics_to_scan)))
@@ -177,6 +181,9 @@ class BagLogNode(Node):
         # Create a subscription to the file name topic
         self._file_name_sub = self.create_subscription(String, self._file_name_topic,
                                                        self._file_name_cb, 1)
+
+        self._stop_logging_svc = self.create_service(Trigger, 'stop_logging',
+                                                     self._stop_logging_cb, callback_group=self._main_cbg)
 
         if not self._disable_usb_monitor:
             # Client to USB File system subscription service that allows the node to add the "models"
@@ -310,6 +317,44 @@ class BagLogNode(Node):
             self._scan_timer = self.create_timer(1.0, callback=self._scan_for_topics_cb,
                                                  callback_group=self._main_cbg)
 
+    def _stop_logging_cb(self, req: Trigger.Request, res: Trigger.Response) -> Trigger.Response:
+        """
+        Callback function to handle the stop logging service request.
+
+        This function is triggered when a request is received to stop the logging process.
+        It stops the recording and sets the target edit state to 'Stopped'.
+
+        Args:
+            req (Trigger.Request): The request message.
+            res (Trigger.Response): The response message.
+
+        Returns:
+            res (Trigger.Response): The response message.
+        """
+        try:
+            res.success = True
+            self._pause_until = time.time() + constants.PAUSE_AFTER_FORCE_STOP
+            pause_time_str = time.strftime('%H:%M:%S', time.localtime(self._pause_until))
+
+            if self._target_edit_state == RecordingState.Stopped:
+                res.message = "Logging already stopped. Pausing until {}.".format(pause_time_str)
+                self.get_logger().info("Logging already stopped. Pausing until {}.".format(pause_time_str))
+                return res                                 
+
+            self._target_edit_state = RecordingState.Stopped
+            res.message = "Logging stopped successfully. Pausing until {}.".format(pause_time_str)
+
+            self.get_logger().info("Stopping logging on service. Closing bag file. Pausing until {}.".format(pause_time_str))
+            self._change_gc.trigger()
+            return res
+
+        except Exception as e:  # noqa E722
+            self.get_logger().error(traceback.format_stack())
+            res.success = False
+            res.message = f"Failed to stop logging: {e}"
+            return res
+
+
     def _scan_for_topics_cb(self):
         """
         Callback function to scan for topics and create subscriptions.
@@ -426,6 +471,12 @@ class BagLogNode(Node):
             if topic == self._monitor_topic:
                 self._monitor_last_received = time_recv
                 if self._target_edit_state == RecordingState.Stopped:
+
+                    if self._pause_until > time.time():
+                        pause_time = time.strftime('%H:%M:%S', time.localtime(self._pause_until))
+                        self.get_logger().info(f"Pausing until {pause_time}.", throttle_duration_sec=1.0)
+                        return
+
                     self._target_edit_state = RecordingState.Running
                     self._change_gc.trigger()
                     self.get_logger().info("Got callback from {}. Triggering start.". format(self._monitor_topic))

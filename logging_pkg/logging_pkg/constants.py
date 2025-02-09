@@ -13,6 +13,9 @@ LOGS_SOURCE_LEAF_DIRECTORY = "logs"
 LOGS_DIR_CB = "logs_dir_cb"
 LOGS_BAG_FOLDER_NAME_PATTERN = "{}-{}"
 
+# Pause after Force stop
+PAUSE_AFTER_FORCE_STOP = 10.0
+
 # Naming
 DEFAULT_BAG_NAME = "deepracer"
 
