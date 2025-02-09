@@ -78,14 +78,21 @@ The `bag_log_node` is a ROS 2 node designed for logging specific topics to a ros
 | `/usb_monitor_pkg/usb_file_system_subscribe` | USBFileSystemSubscribeSrv | Call to register a subscription for a specific folder. In our case `logs`. |
 | `/usb_monitor_pkg/usb_mount_point_manager` | USBMountPointManagerSrv | Defined service, currently unused. |
 
-## Launch files
+### Launch files
 
 The `logging_pkg_launch.py`, included in this package, provides an example demonstrating how to launch the `bag_log_node`.
+
+## Analysis
+
+The `analysis` folder contains scripts and tools for analyzing the logged data. These tools can help you visualize and interpret the data collected by the `bag_log_node`. The contents of the `analysis` folder include:
+
+1. **Data Visualization Scripts**: Scripts to generate plots and graphs from the logged data.
+2. **Data Processing Tools**: Tools to preprocess and clean the logged data for further analysis.
+3. **Example Notebooks**: Jupyter notebooks demonstrating how to analyze the logged data using various data analysis techniques.
 
 ## License
 
 The source code is released under [Apache 2.0](https://aws.amazon.com/apache-2-0/).
-
 
 ## Resources
 
