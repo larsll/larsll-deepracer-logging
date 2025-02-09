@@ -4,17 +4,9 @@
 
 The LarsLL DeepRacer logging ROS package creates the `bag_log_node`, which is an optional node for DeepRacer. It is used to monitor a specific topic and to write to a bag for later investigation.
 
-## License
-
-The source code is released under [Apache 2.0](https://aws.amazon.com/apache-2-0/).
-
 ## Installation
 
 The recommended way to install this node is as part of the DeepRacer Custom Car ([deepracer-custom-car](https://github.com/aws-deepracer-community/deepracer-custom-car)) software stack.
-
-## Launch files
-
-The `logging_pkg_launch.py`, included in this package, provides an example demonstrating how to launch the `bag_log_node`.
 
 ## Node details
 
@@ -85,6 +77,14 @@ The `bag_log_node` is a ROS 2 node designed for logging specific topics to a ros
 | -------------| -------------| ------------|
 | `/usb_monitor_pkg/usb_file_system_subscribe` | USBFileSystemSubscribeSrv | Call to register a subscription for a specific folder. In our case `logs`. |
 | `/usb_monitor_pkg/usb_mount_point_manager` | USBMountPointManagerSrv | Defined service, currently unused. |
+
+## Launch files
+
+The `logging_pkg_launch.py`, included in this package, provides an example demonstrating how to launch the `bag_log_node`.
+
+## License
+
+The source code is released under [Apache 2.0](https://aws.amazon.com/apache-2-0/).
 
 
 ## Resources
