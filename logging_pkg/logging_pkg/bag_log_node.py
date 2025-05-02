@@ -56,7 +56,7 @@ class BagLogNode(Node):
     _topics_to_scan: List[str] = []
     _bag_lock = Lock()
     _bag_writer = None
-
+    _topic_counter = 0
     _pause_until = time.time()
 
     _usb_path = False
@@ -591,6 +591,7 @@ class BagLogNode(Node):
         """
 
         self._bag_writer = None
+        self._topic_counter = 0
 
     def create_topic(self, writer, topic_name:str, topic_type_info: TopicEndpointInfo, serialization_format:str='cdr'):
         """
@@ -606,8 +607,9 @@ class BagLogNode(Node):
             None
         """
 
-        topic_name = topic_name
-        topic = rosbag2_py.TopicMetadata(name=topic_name, type=topic_type_info.topic_type,
+        self._topic_counter += 1
+
+        topic = rosbag2_py.TopicMetadata(id=self._topic_counter, name=topic_name, type=topic_type_info.topic_type,
                                          serialization_format=serialization_format)
 
         writer.create_topic(topic)
