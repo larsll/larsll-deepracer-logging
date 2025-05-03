@@ -609,8 +609,12 @@ class BagLogNode(Node):
 
         self._topic_counter += 1
 
-        topic = rosbag2_py.TopicMetadata(id=self._topic_counter, name=topic_name, type=topic_type_info.topic_type,
-                                         serialization_format=serialization_format)
+        if os.environ["ROS_DISTRO"] == "jazzy":
+            topic = rosbag2_py.TopicMetadata(id=self._topic_counter, name=topic_name, type=topic_type_info.topic_type,
+                                            serialization_format=serialization_format)
+        else:
+            topic = rosbag2_py.TopicMetadata(name=topic_name, type=topic_type_info.topic_type,
+                                            serialization_format=serialization_format)
 
         writer.create_topic(topic)
 
