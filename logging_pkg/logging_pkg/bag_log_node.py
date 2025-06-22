@@ -144,6 +144,8 @@ class BagLogNode(Node):
 
         self._bag_name = constants.DEFAULT_BAG_NAME
 
+        self._log_monitor_topic = self._monitor_topic in self._log_topics
+
     def __enter__(self):
         """
         Enter the runtime context related to this object.
@@ -308,7 +310,8 @@ class BagLogNode(Node):
         if notification_msg.file_name == constants.LOGS_SOURCE_LEAF_DIRECTORY and \
            notification_msg.callback_name == constants.LOGS_DIR_CB:
             self._output_path = os.path.join(notification_msg.path, notification_msg.file_name)
-            self.set_parameters([rclpy.parameter.Parameter('output_path', rclpy.Parameter.Type.STRING, self._output_path)])
+            self.set_parameters([rclpy.parameter.Parameter(
+                'output_path', rclpy.Parameter.Type.STRING, self._output_path)])
             self.get_logger().info(f"New output path: {self._output_path}")
 
         if self._logging_mode == LoggingMode.USBOnly and self._state == NodeState.Starting:
@@ -339,7 +342,7 @@ class BagLogNode(Node):
             if self._target_edit_state == RecordingState.Stopped:
                 res.message = "Logging already stopped. Pausing until {}.".format(pause_time_str)
                 self.get_logger().info("Logging already stopped. Pausing until {}.".format(pause_time_str))
-                return res                                 
+                return res
 
             self._target_edit_state = RecordingState.Stopped
             res.message = "Logging stopped successfully. Pausing until {}.".format(pause_time_str)
@@ -353,7 +356,6 @@ class BagLogNode(Node):
             res.success = False
             res.message = f"Failed to stop logging: {e}"
             return res
-
 
     def _scan_for_topics_cb(self):
         """
@@ -465,7 +467,9 @@ class BagLogNode(Node):
                        and ensures that any acquired locks are released.
         """
         try:
-            self.get_logger().debug("Got message on {}.". format(topic))
+            if self.get_logger().get_effective_level() <= rclpy.logging.LoggingSeverity.DEBUG:
+                self.get_logger().debug(f"Got message on {topic}.")
+
             time_recv = self.get_clock().now()
 
             if topic == self._monitor_topic:
@@ -480,6 +484,10 @@ class BagLogNode(Node):
                     self._target_edit_state = RecordingState.Running
                     self._change_gc.trigger()
                     self.get_logger().info("Got callback from {}. Triggering start.". format(self._monitor_topic))
+
+                if not self._log_monitor_topic:
+                    # If we are not logging the monitor topic, return early.
+                    return
 
             # Check that we are running and that bag is open.
             if self._target_edit_state == RecordingState.Running and self._bag_writer is not None:
@@ -593,7 +601,7 @@ class BagLogNode(Node):
         self._bag_writer = None
         self._topic_counter = 0
 
-    def create_topic(self, writer, topic_name:str, topic_type_info: TopicEndpointInfo, serialization_format:str='cdr'):
+    def create_topic(self, writer, topic_name: str, topic_type_info: TopicEndpointInfo, serialization_format: str = 'cdr'):
         """
         Creates a new topic in the ROS2 bag file.
 
@@ -611,10 +619,10 @@ class BagLogNode(Node):
 
         if os.environ["ROS_DISTRO"] == "jazzy":
             topic = rosbag2_py.TopicMetadata(id=self._topic_counter, name=topic_name, type=topic_type_info.topic_type,
-                                            serialization_format=serialization_format)
+                                             serialization_format=serialization_format)
         else:
             topic = rosbag2_py.TopicMetadata(name=topic_name, type=topic_type_info.topic_type,
-                                            serialization_format=serialization_format)
+                                             serialization_format=serialization_format)
 
         writer.create_topic(topic)
 
