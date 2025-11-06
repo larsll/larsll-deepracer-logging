@@ -15,6 +15,7 @@ from rclpy.qos import HistoryPolicy
 from rclpy.time import Duration
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallbackGroup
+from rclpy.logging import LoggingSeverity
 
 import rosbag2_py
 from rcl_interfaces.msg import ParameterDescriptor, ParameterType
@@ -122,7 +123,7 @@ class BagLogNode(Node):
         self._file_name_topic = self.get_parameter('file_name_topic').value
 
         self.declare_parameter(
-            'monitor_topic_timeout', 1,
+            'monitor_topic_timeout', 15,
             ParameterDescriptor(type=ParameterType.PARAMETER_INTEGER))
         self._monitor_topic_timeout = self.get_parameter('monitor_topic_timeout').value
         self._monitor_timeout_duration = Duration(seconds=self._monitor_topic_timeout)
@@ -465,7 +466,8 @@ class BagLogNode(Node):
                        and ensures that any acquired locks are released.
         """
         try:
-            self.get_logger().debug("Got message on {}.". format(topic))
+            if self.get_logger().is_enabled_for(LoggingSeverity.DEBUG):
+                self.get_logger().debug("Got message on {}.". format(topic))
             time_recv = self.get_clock().now()
 
             if topic == self._monitor_topic:
